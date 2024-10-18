@@ -2,10 +2,21 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import logging
+import yaml
+from yaml.loader import SafeLoader
+import bcrypt
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Loading configuration for authentication
+try:
+    with open('config.yaml', 'r', encoding='utf-8') as file:
+        config = yaml.load(file, Loader=SafeLoader)
+except FileNotFoundError:
+    st.error("Configuration file 'config.yaml' not found.")
+    config = {}
 
 # Utility functions
 def normalize_columns(df):
@@ -69,7 +80,7 @@ def load_and_combine_bid_data(file_path, supplier_name):
         combined_data = pd.concat(data_frames, ignore_index=True)
         return combined_data
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"An error occurred while loading bid data: {e}")
         logger.error(f"Error in load_and_combine_bid_data: {e}")
         return None
 
@@ -80,7 +91,7 @@ def load_baseline_data(file_path):
         baseline_data = normalize_columns(baseline_data)
         return baseline_data
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"An error occurred while loading baseline data: {e}")
         logger.error(f"Error in load_baseline_data: {e}")
         return None
 
@@ -216,14 +227,14 @@ def as_is_analysis(data, column_mapping):
             supplier_capacity = row[supplier_capacity_col] if pd.notna(row[supplier_capacity_col]) else remaining_volume
             awarded_volume = min(remaining_volume, supplier_capacity)
             baseline_volume = awarded_volume
-            baseline_spend = baseline_volume * row[baseline_price_col]
+            baseline_spend = awarded_volume * row[baseline_price_col]
             as_is_spend = awarded_volume * row[bid_price_col]
             as_is_savings = baseline_spend - as_is_spend
             as_is_list.append({
                 'Bid ID': row[bid_id_col],
                 'Bid ID Split': split_index,
                 'Facility': row[facility_col],
-                'Incumbent': row[incumbent_col],
+                'Incumbent': incumbent,
                 'Baseline Price': row[baseline_price_col],
                 'Bid Volume': baseline_volume,
                 'Baseline Spend': baseline_spend,
@@ -308,9 +319,7 @@ def best_of_best_analysis(data, column_mapping):
             })
             logger.debug(f"Best of Best analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume}")
             remaining_volume -= awarded_volume
-            if remaining_volume > 0:
-                split_index = chr(ord(split_index) + 1)
-            else:
+            if remaining_volume <= 0:
                 break
     best_of_best_df = pd.DataFrame(best_of_best_list)
     return best_of_best_df
@@ -355,7 +364,6 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
         bid_rows = bid_data[bid_data[bid_id_col] == bid_id]
         if bid_rows.empty:
             bid_row = data[data[bid_id_col] == bid_id].iloc[0]
-            baseline_spend = bid_row[bid_volume_col] * bid_row[baseline_price_col]
             best_of_best_excl_list.append({
                 'Bid ID': bid_id,
                 'Bid ID Split': 'A',
@@ -363,15 +371,15 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
                 'Incumbent': bid_row[incumbent_col],
                 'Baseline Price': bid_row[baseline_price_col],
                 'Bid Volume': bid_row[bid_volume_col],
-                'Baseline Spend': baseline_spend,
-                'Awarded Supplier': 'Unallocated',
+                'Baseline Spend': bid_row['Baseline Spend'],
+                'Awarded Supplier': 'No Bids',
                 'Awarded Supplier Price': None,
-                'Awarded Volume': bid_row[bid_volume_col],
+                'Awarded Volume': None,
                 'Awarded Supplier Spend': None,
                 'Awarded Supplier Capacity': None,
                 'Savings': None
             })
-            logger.debug(f"All suppliers excluded for Bid ID {bid_id}. Marked as Unallocated.")
+            logger.debug(f"No bids for Bid ID {bid_id} in Best of Best Excluding Suppliers.")
             continue
         remaining_volume = bid_rows.iloc[0][bid_volume_col]
         split_index = 'A'
@@ -382,6 +390,7 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
             baseline_spend = baseline_volume * row[baseline_price_col]
             awarded_spend = awarded_volume * row[bid_price_col]
             savings = baseline_spend - awarded_spend
+
             best_of_best_excl_list.append({
                 'Bid ID': row[bid_id_col],
                 'Bid ID Split': split_index,
@@ -397,15 +406,35 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
                 'Awarded Supplier Capacity': supplier_capacity,
                 'Savings': savings
             })
-            logger.debug(f"Best of Best Excl analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume}")
+            logger.debug(f"Best of Best Excl analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume} to {row[supplier_name_col]}")
             remaining_volume -= awarded_volume
-            if remaining_volume > 0:
-                split_index = chr(ord(split_index) + 1)
-            else:
+            if remaining_volume <= 0:
                 break
+
+        if remaining_volume > 0:
+            # Remaining volume is unallocated
+            best_of_best_excl_list.append({
+                'Bid ID': bid_id,
+                'Bid ID Split': split_index,
+                'Facility': facility_col,
+                'Incumbent': incumbent_col,
+                'Baseline Price': baseline_price_col,
+                'Bid Volume': remaining_volume,
+                'Baseline Spend': remaining_volume * baseline_price_col,
+                'Awarded Supplier': 'Unallocated',
+                'Awarded Supplier Price': None,
+                'Bid Volume': remaining_volume,
+                'Awarded Volume': remaining_volume,
+                'Awarded Supplier Spend': None,
+                'Awarded Supplier Capacity': None,
+                'Savings': None
+            })
+            logger.debug(f"Remaining volume for Bid ID {bid_id} is unallocated after allocating to suppliers.")
+
     best_of_best_excl_df = pd.DataFrame(best_of_best_excl_list)
     return best_of_best_excl_df
 
+# Function for As-Is Excluding Suppliers analysis
 def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions):
     """Perform 'As-Is Excluding Suppliers' analysis with exclusion rules."""
     logger.info("Starting As-Is Excluding Suppliers analysis.")
@@ -454,7 +483,11 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
         incumbent_excluded = False
         for condition in excluded_conditions:
             supplier, field, logic, value, exclude_all = condition
-            if supplier == incumbent and (exclude_all or (logic == "Equal to" and all_rows[field].iloc[0] == value) or (logic == "Not equal to" and all_rows[field].iloc[0] != value)):
+            if supplier == incumbent and (
+                exclude_all or
+                (logic == "Equal to" and all_rows[field].iloc[0] == value) or
+                (logic == "Not equal to" and all_rows[field].iloc[0] != value)
+            ):
                 incumbent_excluded = True
                 break
         
@@ -517,6 +550,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Baseline Spend': baseline_spend,
                     'Awarded Supplier': 'Unallocated',
                     'Awarded Supplier Price': None,
+                    'Bid Volume': bid_volume,
                     'Awarded Volume': bid_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
@@ -543,6 +577,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Baseline Spend': baseline_spend,
                     'Awarded Supplier': 'Unallocated',
                     'Awarded Supplier Price': None,
+                    'Bid Volume': bid_volume,
                     'Awarded Volume': bid_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
@@ -578,7 +613,6 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 remaining_volume -= awarded_volume
                 if remaining_volume <= 0:
                     break
-                split_index = chr(ord(split_index) + 1)
             
             if remaining_volume > 0:
                 # Remaining volume is unallocated
@@ -592,6 +626,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Baseline Spend': remaining_volume * baseline_price,
                     'Awarded Supplier': 'Unallocated',
                     'Awarded Supplier Price': None,
+                    'Bid Volume': remaining_volume,
                     'Awarded Volume': remaining_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
@@ -602,13 +637,16 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     as_is_excl_df = pd.DataFrame(as_is_excl_list)
     return as_is_excl_df
 
-# Streamlit App
 def main():
-    st.title("Scenario Analysis Tool")
-
     # Initialize session state variables
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'username' not in st.session_state:
+        st.session_state.username = ''
     if 'merged_data' not in st.session_state:
         st.session_state.merged_data = None
+    if 'original_merged_data' not in st.session_state:
+        st.session_state.original_merged_data = None
     if 'column_mapping' not in st.session_state:
         st.session_state.column_mapping = {}
     if 'columns' not in st.session_state:
@@ -622,12 +660,37 @@ def main():
     if 'current_section' not in st.session_state:
         st.session_state.current_section = 'home'
 
+    # Header with two columns: Title and User Info/Navigation
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title("Scenario Analysis Tool")
+    with col2:
+        if st.session_state.authenticated:
+            # Display welcome message and logout button
+            st.markdown(f"**Welcome, {st.session_state.username}!**")
+            logout = st.button("Logout")
+            if logout:
+                st.session_state.authenticated = False
+                st.session_state.username = ''
+                # Remove the 'logged_in' query parameter upon logout
+                if "logged_in" in st.query_params:
+                    del st.query_params["logged_in"]
+                st.success("You have been logged out.")
+                logger.info(f"User logged out successfully.")
+        else:
+            # Display a button/link to navigate to 'My Projects'
+            login = st.button("Login to My Projects")
+            if login:
+                st.session_state.current_section = 'analysis'
+
     # Sidebar navigation using buttons
     st.sidebar.title('Navigation')
 
     # Define a function to handle navigation button clicks
     def navigate_to(section):
         st.session_state.current_section = section
+        # Optionally, set a query parameter to reflect navigation
+        st.experimental_set_query_params(section=section)
 
     # Create buttons in the sidebar for navigation
     if st.sidebar.button('Home'):
@@ -646,7 +709,49 @@ def main():
 
     if section == 'home':
         st.title('Home')
-        st.write("This section is under construction.")
+        st.write("Welcome to the Scenario Analysis Tool.")
+
+        if not st.session_state.authenticated:
+            st.write("You are not logged in. Please navigate to 'My Projects' to log in and access your projects.")
+        else:
+            st.write(f"Welcome, {st.session_state.username}!")
+
+    elif section == 'analysis':
+        st.title('My Projects')
+        with st.container():
+            if not st.session_state.authenticated:
+                st.header("Log In to Access My Projects")
+                # Create a login form
+                with st.form(key='login_form'):
+                    username = st.text_input("Username")
+                    password = st.text_input("Password", type='password')
+                    submit_button = st.form_submit_button(label='Login')
+
+                if submit_button:
+                    if 'credentials' in config and 'usernames' in config['credentials']:
+                        if username in config['credentials']['usernames']:
+                            stored_hashed_password = config['credentials']['usernames'][username]['password']
+                            # Verify the entered password against the stored hashed password
+                            if bcrypt.checkpw(password.encode('utf-8'), stored_hashed_password.encode('utf-8')):
+                                st.session_state.authenticated = True
+                                st.session_state.username = username
+                                st.success(f"Logged in as {username}")
+                                logger.info(f"User {username} logged in successfully.")
+                                # Optionally, navigate to a different section or update UI
+                                # For immediate UI update, Streamlit automatically reruns the script
+                            else:
+                                st.error("Incorrect password. Please try again.")
+                                logger.warning(f"Incorrect password attempt for user {username}.")
+                        else:
+                            st.error("Username not found. Please check and try again.")
+                            logger.warning(f"Login attempt with unknown username: {username}")
+                    else:
+                        st.error("Authentication configuration is missing.")
+                        logger.error("Authentication configuration is missing in 'config.yaml'.")
+
+            if st.session_state.authenticated:
+                st.write("This section is under construction.")
+                # Here you can add functionalities related to "My Projects"
 
     elif section == 'upload':
         st.title('Start a New Analysis')
@@ -692,60 +797,8 @@ def main():
                 "As-Is",
                 "Best of Best",
                 "Best of Best Excluding Suppliers",
-                "As-Is Excluding Suppliers"  # Added new analysis option
+                "As-Is Excluding Suppliers"
             ])
-
-            # Exclusion rules for Best of Best Excluding Suppliers
-            if "Best of Best Excluding Suppliers" in analyses_to_run:
-                with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
-                    st.header("Exclusion Rules for Best of Best Excluding Suppliers")
-
-                    supplier_name = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_bob")
-                    field = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_bob")
-                    logic = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_bob")
-                    value = st.selectbox("Select Value", st.session_state.merged_data[field].unique(), key="value_excl_bob")
-                    exclude_all = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_bob")
-
-                    if st.button("Add Exclusion Rule", key="add_excl_bob"):
-                        if 'exclusions_bob' not in st.session_state:
-                            st.session_state.exclusions_bob = []
-                        st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
-                        logger.debug(f"Added exclusion rule for BOB Excl Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
-
-                    if st.button("Clear Exclusion Rules", key="clear_excl_bob"):
-                        st.session_state.exclusions_bob = []
-                        logger.debug("Cleared all exclusion rules for BOB Excl Suppliers.")
-
-                    if 'exclusions_bob' in st.session_state:
-                        st.write("Current Exclusion Rules for Best of Best Excluding Suppliers:")
-                        for i, excl in enumerate(st.session_state.exclusions_bob):
-                            st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
-
-            # Exclusion rules for As-Is Excluding Suppliers
-            if "As-Is Excluding Suppliers" in analyses_to_run:
-                with st.expander("Configure Exclusion Rules for As-Is Excluding Suppliers"):
-                    st.header("Exclusion Rules for As-Is Excluding Suppliers")
-
-                    supplier_name_ais = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_ais")
-                    field_ais = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_ais")
-                    logic_ais = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_ais")
-                    value_ais = st.selectbox("Select Value", st.session_state.merged_data[field_ais].unique(), key="value_excl_ais")
-                    exclude_all_ais = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_ais")
-
-                    if st.button("Add Exclusion Rule", key="add_excl_ais"):
-                        if 'exclusions_ais' not in st.session_state:
-                            st.session_state.exclusions_ais = []
-                        st.session_state.exclusions_ais.append((supplier_name_ais, field_ais, logic_ais, value_ais, exclude_all_ais))
-                        logger.debug(f"Added exclusion rule for As-Is Excl Suppliers: {supplier_name_ais}, {field_ais}, {logic_ais}, {value_ais}, Exclude All: {exclude_all_ais}")
-
-                    if st.button("Clear Exclusion Rules", key="clear_excl_ais"):
-                        st.session_state.exclusions_ais = []
-                        logger.debug("Cleared all exclusion rules for As-Is Excl Suppliers.")
-
-                    if 'exclusions_ais' in st.session_state:
-                        st.write("Current Exclusion Rules for As-Is Excluding Suppliers:")
-                        for i, excl in enumerate(st.session_state.exclusions_ais):
-                            st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
 
             if st.button("Run Analysis"):
                 with st.spinner("Running analysis..."):
@@ -790,10 +843,6 @@ def main():
                 )
                 logger.info("Analysis results prepared for download.")
 
-    elif section == 'analysis':
-        st.title('My Projects')
-        st.write("This section is under construction.")
-
     elif section == 'settings':
         st.title('Settings')
         st.write("This section is under construction.")
@@ -808,4 +857,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
