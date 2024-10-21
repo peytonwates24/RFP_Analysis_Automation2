@@ -789,7 +789,6 @@ def main():
         st.session_state.selected_project = None
         st.session_state.selected_subfolder = None
         # Update the page title
-        st.rerun()
 
     # Create buttons in the sidebar for navigation
     if st.sidebar.button('Home'):
@@ -819,7 +818,6 @@ def main():
                         st.session_state.selected_project = project
                         st.session_state.selected_subfolder = subfolder
                         # Update the page title
-                        st.rerun()
                         
   # Display content based on the current section
     section = st.session_state.current_section
@@ -923,7 +921,6 @@ def main():
                                 st.session_state.selected_project = project
                                 st.session_state.selected_subfolder = subfolder
                                 # Update the page title
-                                st.rerun()
             else:
                 st.info("No projects found. Start by creating a new project.")
 
@@ -1091,7 +1088,6 @@ def main():
                         if path_buttons[i].button(component, key=key):
                             st.session_state.selected_subfolder = None
                             # Update the page title
-                            st.rerun()
                     else:
                         # Disabled button for current folder
                         path_buttons[i].button(component, disabled=True, key=key+'_current')
@@ -1158,7 +1154,6 @@ def main():
                 if st.button(subfolder, key=f"subfolder_{subfolder}"):
                     st.session_state.selected_subfolder = subfolder
                     # Update the page title
-                    st.rerun()
 
         else:
             st.error("No project selected.")
