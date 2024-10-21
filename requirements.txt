@@ -1,10 +1,6 @@
-import streamlit as st
-import pandas as pd
-from io import BytesIO
-import logging
-import yaml
-from yaml.loader import SafeLoader
-import bcrypt
-import os
-from pathlib import Path
-import shutil
+streamlit==1.24.1
+pandas==1.5.3
+PyYAML==6.0
+bcrypt==4.0.1
+openpyxl==3.0.10
+XlsxWriter==3.0.3
