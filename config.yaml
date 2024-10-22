@@ -3,16 +3,27 @@ credentials:
     peytonwates:
       email: Peyton.Wates@GAPAC.com
       name: Peyton Wates
-      password: "$2b$12$IDvEENKx9xSWNBHb3h38xuEdiJtcK8.JjnzeaoAaZOUgqymmYaeAm"
+      password: "$$2b$12$UsX/0SgDZ1si613JqlYl9u.3caEbMxtvhshmQMykKSC9whZwVeFnK"
     jaredgordon:
       email: Jared.Gordon@GAPAC.com
       name: Jared Gordon
-      password: "$2b$12$0bqs2iXbfS0GFjjgZkM3v.lrLOn7nkcL1NjNkHhNtuYJIPBTu6uPW"
+      password: "$2b$12$uOw/GyGz3bCc6EjHY5JW1ecSYaMeW0.ix0g.w99GNGjl61QRCHgre"
     chriswang:
       email: Christopher.Wang@GAPAC.com
       name: Chris Wang
-      password: "$2b$12$Ar/xLrRqeLXu0q0TyCwrquN0wQbQakZqEZEO0htZdkI0EtboymD7m"
-
+      password: "$2b$12$4/CZyO4tQeNHW8XhL.NiXegZaCJ44s5ci3/Qu0jh9bCsKNs66fJgW"
+    elizabethlim:
+      email: Elizabeth.Lim@GAPAC.com
+      name: Elizabeth Lim
+      password: "$2b$12$oehw4Qz29yqn0inws7lhb.1u9rpEf7UdXttBB3RksPRPiQHf7BXrO"
+    miniagong:
+      email: Minia.Gong@GAPAC.com
+      name: Minia Gong
+      password: "$2b$12$Yo86bUbatiGZmukCBfpgXuBv/WmNg2FC1N1Co1i8RCgC/okmCQUKu"
+    amberbrown:
+      email: Amber.Brown1@GAPAC.com
+      name: Amber Brown
+      password: "$2b$12$kN6E20GzrVHtlk7TCtSjO.PrE/PcD109U/0cKZsXBjK0xhiL6cXFa"      
 
 cookie:
   name: "some_cookie_name"
