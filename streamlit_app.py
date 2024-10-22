@@ -337,6 +337,32 @@ def best_of_best_analysis(data, column_mapping):
     best_of_best_df = pd.DataFrame(best_of_best_list)
     return best_of_best_df
 
+def format_exclusion_rule(excl):
+    """
+    Formats an exclusion rule for display.
+
+    Parameters:
+        excl (tuple): A tuple containing exclusion rule details in the order
+                      (Supplier Name, Field, Logic, Value, Exclude All).
+
+    Returns:
+        str: A formatted string representing the exclusion rule.
+    """
+    supplier, field, logic, value, exclude_all = excl
+    if exclude_all:
+        return f"{supplier} is excluded for consideration on all bids."
+    else:
+        # Ensure consistent lowercase logic for readability
+        if logic.lower() == "equal to":
+            logic_lower = "equal to"
+        elif logic.lower() == "not equal to":
+            logic_lower = "not equal to"
+        else:
+            logic_lower = logic.lower()  # Handle any unexpected logic entries
+        return f"{supplier} is excluded where {field} {logic_lower} {value}."
+
+
+
 # Function for Best of Best Excluding Suppliers analysis
 def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
     """Perform 'Best of Best Excluding Suppliers' analysis."""
@@ -745,7 +771,11 @@ def main():
         st.session_state.selected_project = None
     if 'selected_subfolder' not in st.session_state:
         st.session_state.selected_subfolder = None
-        
+    if 'upload_mode' not in st.session_state:
+        st.session_state.upload_mode = None  # Existing session state variable
+    if 'selected_sheet' not in st.session_state:
+        st.session_state.selected_sheet = None  # New session state variable
+
     # Header with logo and page title
     st.markdown(
         f"""
@@ -770,25 +800,29 @@ def main():
             if logout:
                 st.session_state.authenticated = False
                 st.session_state.username = ''
+                st.session_state.upload_mode = None  # Reset upload_mode on logout
+                st.session_state.selected_sheet = None  # Reset selected_sheet on logout
                 st.success("You have been logged out.")
                 logger.info(f"User logged out successfully.")
-                # No rerun needed; Streamlit will re-execute on next interaction
+                # Optionally, reset other session states if necessary
         else:
             # Display a button to navigate to 'My Projects'
             login = st.button("Login to My Projects", key='login_button')
             if login:
                 st.session_state.current_section = 'analysis'
-                # The UI will re-render on next interaction
-        
+                logger.info("User navigated to 'My Projects' for login.")
+
     # Sidebar navigation using buttons
     st.sidebar.title('Navigation')
 
-# Define a function to handle navigation button clicks
+    # Define a function to handle navigation button clicks
     def navigate_to(section):
         st.session_state.current_section = section
         st.session_state.selected_project = None
         st.session_state.selected_subfolder = None
-        # Update the page title
+        st.session_state.upload_mode = None  # Reset upload_mode when navigating away
+        st.session_state.selected_sheet = None  # Reset selected_sheet when navigating away
+        logger.info(f"Navigated to section: {section}")
 
     # Create buttons in the sidebar for navigation
     if st.sidebar.button('Home'):
@@ -817,9 +851,9 @@ def main():
                         st.session_state.current_section = 'project_folder'
                         st.session_state.selected_project = project
                         st.session_state.selected_subfolder = subfolder
-                        # Update the page title
-                        
-  # Display content based on the current section
+                        logger.info(f"Selected project folder: {project}/{subfolder}")
+
+    # Display content based on the current section
     section = st.session_state.current_section
 
     if section == 'home':
@@ -850,7 +884,9 @@ def main():
                             st.session_state.username = username
                             st.success(f"Logged in as {username}")
                             logger.info(f"User {username} logged in successfully.")
-                            # No rerun needed; Streamlit will re-execute on next interaction
+                            # Reset upload_mode and selected_sheet after successful login
+                            st.session_state.upload_mode = None
+                            st.session_state.selected_sheet = None
                         else:
                             st.error("Incorrect password. Please try again.")
                             logger.warning(f"Incorrect password attempt for user {username}.")
@@ -920,152 +956,509 @@ def main():
                                 st.session_state.current_section = 'project_folder'
                                 st.session_state.selected_project = project
                                 st.session_state.selected_subfolder = subfolder
-                                # Update the page title
+                                logger.info(f"Selected project folder: {project}/{subfolder}")
             else:
                 st.info("No projects found. Start by creating a new project.")
 
     elif section == 'upload':
         st.title('Start a New Analysis')
-        st.write("Upload your baseline and bid data here.")
 
-        # Upload baseline file
-        baseline_file = st.file_uploader("Upload Baseline Sheet", type=["xlsx"])
-        num_files = st.number_input("Number of Bid Sheets to Upload", min_value=1, step=1)
+        # Check if upload_mode is set
+        if st.session_state.upload_mode is None:
+            st.markdown("### Choose Data Upload Method")
+            upload_mode = st.radio(
+                "How would you like to provide your data?",
+                ("Provide Merged Data", "Provide Bid Files and Baseline Separately")
+            )
+            if st.button("Confirm Selection"):
+                if upload_mode == "Provide Merged Data":
+                    st.session_state.upload_mode = 'merged'
+                    st.session_state.selected_sheet = None  # Reset selected_sheet
+                    logger.info("User selected to provide Merged Data.")
+                else:
+                    st.session_state.upload_mode = 'separate'
+                    st.session_state.selected_sheet = None  # Reset selected_sheet
+                    logger.info("User selected to provide Bid Files and Baseline Separately.")
 
-        bid_files_suppliers = []
-        for i in range(int(num_files)):
-            bid_file = st.file_uploader(f"Upload Bid Sheet {i + 1}", type=["xlsx"], key=f'bid_file_{i}')
-            supplier_name = st.text_input(f"Supplier Name for Bid Sheet {i + 1}", key=f'supplier_name_{i}')
-            if bid_file and supplier_name:
-                bid_files_suppliers.append((bid_file, supplier_name))
-                logger.info(f"Uploaded Bid Sheet {i + 1} for supplier '{supplier_name}'.")
+        elif st.session_state.upload_mode == 'merged':
+            st.markdown("### Upload Merged Data")
+            merged_data_file = st.file_uploader("Upload Merged Data File", type=["xlsx"], key='merged_data_file')
 
-        # Merge Data
-        if st.button("Merge Data"):
-            if validate_uploaded_file(baseline_file) and bid_files_suppliers:
-                baseline_data = load_baseline_data(baseline_file)
-                if baseline_data is not None:
-                    merged_data = start_process(baseline_data, bid_files_suppliers)
-                    if merged_data is not None:
-                        st.session_state.merged_data = merged_data
-                        st.session_state.original_merged_data = merged_data.copy()
-                        st.session_state.columns = list(merged_data.columns)
-                        st.session_state.baseline_data = baseline_data
-                        st.success("Data Merged Successfully. Please map the columns for analysis.")
-                        logger.info("Data merged successfully.")
+            if merged_data_file:
+                if validate_uploaded_file(merged_data_file):
+                    try:
+                        # Load the Excel file to detect sheets
+                        excel_file = pd.ExcelFile(merged_data_file, engine='openpyxl')
+                        sheet_names = excel_file.sheet_names
+                        num_sheets = len(sheet_names)
 
-        if st.session_state.merged_data is not None:
-            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
+                        if num_sheets > 1 and st.session_state.selected_sheet is None:
+                            st.session_state.selected_sheet = None  # Reset if multiple uploads
+                            st.warning(f"Multiple sheets detected ({num_sheets}). Please select a sheet to use for analysis.")
 
-            # Ensure column_mapping persists
-            if not st.session_state.column_mapping or set(st.session_state.column_mapping.keys()) != set(required_columns):
-                st.session_state.column_mapping = auto_map_columns(st.session_state.merged_data, required_columns)
+                        if num_sheets > 1:
+                            # Present a selectbox to choose the sheet
+                            selected_sheet = st.selectbox(
+                                "Select the sheet (tab) to use for column mapping:",
+                                sheet_names,
+                                key='sheet_selection'
+                            )
+                            if selected_sheet:
+                                st.session_state.selected_sheet = selected_sheet
+                                logger.info(f"User selected sheet: {selected_sheet}")
+                        else:
+                            # Only one sheet, proceed automatically
+                            st.session_state.selected_sheet = sheet_names[0]
+                            st.info(f"Single sheet detected: '{sheet_names[0]}'. Proceeding with this sheet.")
+                            logger.info(f"Single sheet detected: {sheet_names[0]}. Proceeding automatically.")
 
-            st.write("Map the following columns:")
-            for col in required_columns:
-                st.session_state.column_mapping[col] = st.selectbox(f"Select Column for {col}", st.session_state.merged_data.columns, key=f"{col}_mapping")
+                        # Once a sheet is selected, load the data
+                        if st.session_state.selected_sheet:
+                            try:
+                                merged_data = pd.read_excel(merged_data_file, sheet_name=st.session_state.selected_sheet, engine='openpyxl')
+                                merged_data = normalize_columns(merged_data)
+                                merged_data = consolidate_columns(merged_data)
+                                st.session_state.merged_data = merged_data
+                                st.session_state.original_merged_data = merged_data.copy()
+                                st.session_state.columns = list(merged_data.columns)
+                                st.success("Merged data uploaded successfully. Please map the columns for analysis.")
+                                logger.info(f"Merged data from sheet '{st.session_state.selected_sheet}' uploaded successfully.")
 
-            analyses_to_run = st.multiselect("Select Scenario Analyses to Run", [
-                "As-Is",
-                "Best of Best",
-                "Best of Best Excluding Suppliers",
-                "As-Is Excluding Suppliers"  # Added new analysis option
-            ])
+                                # Display available columns for debugging
+                                st.write("Available Columns in Uploaded Data:", st.session_state.merged_data.columns.tolist())
 
-            # Exclusion rules for Best of Best Excluding Suppliers
-            if "Best of Best Excluding Suppliers" in analyses_to_run:
-                with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
-                    st.header("Exclusion Rules for Best of Best Excluding Suppliers")
+                            except Exception as e:
+                                st.error(f"Error loading data from sheet '{st.session_state.selected_sheet}': {e}")
+                                logger.error(f"Error loading data from sheet '{st.session_state.selected_sheet}': {e}")
 
-                    supplier_name = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_bob")
-                    field = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_bob")
-                    logic = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_bob")
-                    value = st.selectbox("Select Value", st.session_state.merged_data[field].unique(), key="value_excl_bob")
-                    exclude_all = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_bob")
+                    except Exception as e:
+                        st.error(f"Error processing the uploaded file: {e}")
+                        logger.error(f"Error processing the uploaded merged data file: {e}")
 
-                    if st.button("Add Exclusion Rule", key="add_excl_bob"):
-                        if 'exclusions_bob' not in st.session_state:
-                            st.session_state.exclusions_bob = []
-                        st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
-                        logger.debug(f"Added exclusion rule for BOB Excl Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
+            if st.session_state.merged_data is not None and st.session_state.selected_sheet:
+                required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
 
-                    if st.button("Clear Exclusion Rules", key="clear_excl_bob"):
-                        st.session_state.exclusions_bob = []
-                        logger.debug("Cleared all exclusion rules for BOB Excl Suppliers.")
+                # Ensure column_mapping persists
+                if not st.session_state.column_mapping or set(st.session_state.column_mapping.keys()) != set(required_columns):
+                    st.session_state.column_mapping = auto_map_columns(st.session_state.merged_data, required_columns)
 
-                    if 'exclusions_bob' in st.session_state:
-                        st.write("Current Exclusion Rules for Best of Best Excluding Suppliers:")
-                        for i, excl in enumerate(st.session_state.exclusions_bob):
-                            st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
+                st.write("### Map the Following Columns:")
+                for col in required_columns:
+                    st.session_state.column_mapping[col] = st.selectbox(
+                        f"Select Column for {col}",
+                        st.session_state.merged_data.columns,
+                        key=f"{col}_mapping"
+                    )
 
-            # Exclusion rules for As-Is Excluding Suppliers
-            if "As-Is Excluding Suppliers" in analyses_to_run:
-                with st.expander("Configure Exclusion Rules for As-Is Excluding Suppliers"):
-                    st.header("Exclusion Rules for As-Is Excluding Suppliers")
-
-                    supplier_name_ais = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_ais")
-                    field_ais = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_ais")
-                    logic_ais = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_ais")
-                    value_ais = st.selectbox("Select Value", st.session_state.merged_data[field_ais].unique(), key="value_excl_ais")
-                    exclude_all_ais = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_ais")
-
-                    if st.button("Add Exclusion Rule", key="add_excl_ais"):
-                        if 'exclusions_ais' not in st.session_state:
-                            st.session_state.exclusions_ais = []
-                        st.session_state.exclusions_ais.append((supplier_name_ais, field_ais, logic_ais, value_ais, exclude_all_ais))
-                        logger.debug(f"Added exclusion rule for As-Is Excl Suppliers: {supplier_name_ais}, {field_ais}, {logic_ais}, {value_ais}, Exclude All: {exclude_all_ais}")
-
-                    if st.button("Clear Exclusion Rules", key="clear_excl_ais"):
-                        st.session_state.exclusions_ais = []
-                        logger.debug("Cleared all exclusion rules for As-Is Excl Suppliers.")
-
-                    if 'exclusions_ais' in st.session_state:
-                        st.write("Current Exclusion Rules for As-Is Excluding Suppliers:")
-                        for i, excl in enumerate(st.session_state.exclusions_ais):
-                            st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
-
-            if st.button("Run Analysis"):
-                with st.spinner("Running analysis..."):
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        baseline_data = st.session_state.baseline_data
-                        original_merged_data = st.session_state.original_merged_data
-
-                        if "As-Is" in analyses_to_run:
-                            as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
-                            as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
-                            as_is_df.to_excel(writer, sheet_name='As-Is', index=False)
-                            logger.info("As-Is analysis completed.")
-
-                        if "Best of Best" in analyses_to_run:
-                            best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
-                            best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
-                            best_of_best_df.to_excel(writer, sheet_name='Best of Best', index=False)
-                            logger.info("Best of Best analysis completed.")
-
-                        if "Best of Best Excluding Suppliers" in analyses_to_run:
-                            exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
-                            best_of_best_excl_df = best_of_best_excluding_suppliers(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_bob)
-                            best_of_best_excl_df = add_missing_bid_ids(best_of_best_excl_df, original_merged_data, st.session_state.column_mapping, 'BOB Excl Suppliers')
-                            best_of_best_excl_df.to_excel(writer, sheet_name='BOB Excl Suppliers', index=False)
-                            logger.info("Best of Best Excluding Suppliers analysis completed.")
-
-                        if "As-Is Excluding Suppliers" in analyses_to_run:
-                            exclusions_list_ais = st.session_state.exclusions_ais if 'exclusions_ais' in st.session_state else []
-                            as_is_excl_df = as_is_excluding_suppliers_analysis(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_ais)
-                            as_is_excl_df = add_missing_bid_ids(as_is_excl_df, original_merged_data, st.session_state.column_mapping, 'As-Is Excl Suppliers')
-                            as_is_excl_df.to_excel(writer, sheet_name='As-Is Excl Suppliers', index=False)
-                            logger.info("As-Is Excluding Suppliers analysis completed.")
-
-                    processed_data = output.getvalue()
-
-                st.download_button(
-                    label="Download Analysis Results",
-                    data=processed_data,
-                    file_name="scenario_analysis_results.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                analyses_to_run = st.multiselect(
+                    "Select Scenario Analyses to Run",
+                    [
+                        "As-Is",
+                        "Best of Best",
+                        "Best of Best Excluding Suppliers",
+                        "As-Is Excluding Suppliers"
+                    ]
                 )
-                logger.info("Analysis results prepared for download.")
+
+                # Retrieve the mapped supplier column
+                supplier_name_column = st.session_state.column_mapping.get('Supplier Name')
+
+                if supplier_name_column and supplier_name_column in st.session_state.merged_data.columns:
+                    # Add 'Awarded Supplier' column by copying 'Supplier Name'
+                    st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[supplier_name_column]
+                    logger.info(f"'Awarded Supplier' column added from '{supplier_name_column}'.")
+                else:
+                    st.error("Mapped 'Supplier Name' column not found in data. Please verify the column mapping.")
+                    logger.error("Mapped 'Supplier Name' column not found in data.")
+
+                # Now, proceed with the exclusion rules and analyses as before
+                # Exclusion rules for Best of Best Excluding Suppliers
+                if "Best of Best Excluding Suppliers" in analyses_to_run:
+                    with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
+                        st.header("Exclusion Rules for Best of Best Excluding Suppliers")
+
+                        if 'Awarded Supplier' in st.session_state.merged_data.columns:
+                            unique_suppliers = st.session_state.merged_data['Awarded Supplier'].unique()
+                            if unique_suppliers.size > 0:
+                                supplier_name = st.selectbox(
+                                    "Select Supplier to Exclude",
+                                    unique_suppliers,
+                                    key="supplier_name_excl_bob"
+                                )
+                            else:
+                                st.warning("No suppliers available to exclude. Please check your data and column mappings.")
+                                supplier_name = None
+                        else:
+                            st.error("'Awarded Supplier' column not found. Please ensure it exists in the data.")
+                            unique_suppliers = []
+                            supplier_name = None
+
+                        field = st.selectbox(
+                            "Select Field for Rule",
+                            st.session_state.merged_data.columns,
+                            key="field_excl_bob"
+                        )
+                        logic = st.selectbox(
+                            "Select Logic (Equal to or Not equal to)",
+                            ["Equal to", "Not equal to"],
+                            key="logic_excl_bob"
+                        )
+                        value = st.selectbox(
+                            "Select Value",
+                            st.session_state.merged_data[field].unique(),
+                            key="value_excl_bob"
+                        )
+                        exclude_all = st.checkbox(
+                            "Exclude from all Bid IDs",
+                            key="exclude_all_excl_bob"
+                        )
+
+                        if st.button("Add Exclusion Rule for Best of Best Excl Suppliers", key="add_excl_bob"):
+                            if 'exclusions_bob' not in st.session_state:
+                                st.session_state.exclusions_bob = []
+                            st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
+                            logger.debug(f"Added exclusion rule for Best of Best Excluding Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
+
+                        if st.button("Clear Exclusion Rules for Best of Best Excl Suppliers", key="clear_excl_bob"):
+                            st.session_state.exclusions_bob = []
+                            logger.debug("Cleared all exclusion rules for Best of Best Excluding Suppliers.")
+
+                        if 'exclusions_bob' in st.session_state and st.session_state.exclusions_bob:
+                            st.write("**Current Exclusion Rules for Best of Best Excluding Suppliers:**")
+                            for i, excl in enumerate(st.session_state.exclusions_bob):
+                                formatted_rule = format_exclusion_rule(excl)
+                                st.write(f"{i + 1}. {formatted_rule}")
+
+
+
+                # Exclusion rules for As-Is Excluding Suppliers
+                if "As-Is Excluding Suppliers" in analyses_to_run:
+                    with st.expander("Configure Exclusion Rules for As-Is Excluding Suppliers"):
+                        st.header("Exclusion Rules for As-Is Excluding Suppliers")
+
+                        if 'Awarded Supplier' in st.session_state.merged_data.columns:
+                            unique_suppliers_ais = st.session_state.merged_data['Awarded Supplier'].unique()
+                            if unique_suppliers_ais.size > 0:
+                                supplier_name_ais = st.selectbox(
+                                    "Select Supplier to Exclude",
+                                    unique_suppliers_ais,
+                                    key="supplier_name_excl_ais"
+                                )
+                            else:
+                                st.warning("No suppliers available to exclude. Please check your data and column mappings.")
+                                supplier_name_ais = None
+                        else:
+                            st.error("'Awarded Supplier' column not found. Please ensure it exists in the data.")
+                            unique_suppliers_ais = []
+                            supplier_name_ais = None
+
+                        field_ais = st.selectbox(
+                            "Select Field for Rule",
+                            st.session_state.merged_data.columns,
+                            key="field_excl_ais"
+                        )
+                        logic_ais = st.selectbox(
+                            "Select Logic (Equal to or Not equal to)",
+                            ["Equal to", "Not equal to"],
+                            key="logic_excl_ais"
+                        )
+                        value_ais = st.selectbox(
+                            "Select Value",
+                            st.session_state.merged_data[field_ais].unique(),
+                            key="value_excl_ais"
+                        )
+                        exclude_all_ais = st.checkbox(
+                            "Exclude from all Bid IDs",
+                            key="exclude_all_excl_ais"
+                        )
+
+                        if st.button("Add Exclusion Rule for As-Is Excl Suppliers", key="add_excl_ais"):
+                            if 'exclusions_ais' not in st.session_state:
+                                st.session_state.exclusions_ais = []
+                            st.session_state.exclusions_ais.append((supplier_name_ais, field_ais, logic_ais, value_ais, exclude_all_ais))
+                            logger.debug(f"Added exclusion rule for As-Is Excluding Suppliers: {supplier_name_ais}, {field_ais}, {logic_ais}, {value_ais}, Exclude All: {exclude_all_ais}")
+
+                        if st.button("Clear Exclusion Rules for As-Is Excl Suppliers", key="clear_excl_ais"):
+                            st.session_state.exclusions_ais = []
+                            logger.debug("Cleared all exclusion rules for As-Is Excluding Suppliers.")
+
+                        if 'exclusions_ais' in st.session_state and st.session_state.exclusions_ais:
+                            st.write("**Current Exclusion Rules for As-Is Excluding Suppliers:**")
+                            for i, excl in enumerate(st.session_state.exclusions_ais):
+                                formatted_rule = format_exclusion_rule(excl)
+                                st.write(f"{i + 1}. {formatted_rule}")
+        
+
+
+                # Proceed with running the analysis
+                if st.button("Run Analysis"):
+                    with st.spinner("Running analysis..."):
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            baseline_data = st.session_state.baseline_data
+                            original_merged_data = st.session_state.original_merged_data
+
+                            if "As-Is" in analyses_to_run:
+                                as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
+                                as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
+                                as_is_df.to_excel(writer, sheet_name='As-Is', index=False)
+                                logger.info("As-Is analysis completed.")
+
+                            if "Best of Best" in analyses_to_run:
+                                best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
+                                best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
+                                best_of_best_df.to_excel(writer, sheet_name='Best of Best', index=False)
+                                logger.info("Best of Best analysis completed.")
+
+                            if "Best of Best Excluding Suppliers" in analyses_to_run:
+                                exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
+                                best_of_best_excl_df = best_of_best_excluding_suppliers(
+                                    st.session_state.merged_data,
+                                    st.session_state.column_mapping,
+                                    exclusions_list_bob
+                                )
+                                best_of_best_excl_df = add_missing_bid_ids(
+                                    best_of_best_excl_df,
+                                    original_merged_data,
+                                    st.session_state.column_mapping,
+                                    'BOB Excl Suppliers'
+                                )
+                                best_of_best_excl_df.to_excel(writer, sheet_name='BOB Excl Suppliers', index=False)
+                                logger.info("Best of Best Excluding Suppliers analysis completed.")
+
+                            if "As-Is Excluding Suppliers" in analyses_to_run:
+                                exclusions_list_ais = st.session_state.exclusions_ais if 'exclusions_ais' in st.session_state else []
+                                as_is_excl_df = as_is_excluding_suppliers_analysis(
+                                    st.session_state.merged_data,
+                                    st.session_state.column_mapping,
+                                    exclusions_list_ais
+                                )
+                                as_is_excl_df = add_missing_bid_ids(
+                                    as_is_excl_df,
+                                    original_merged_data,
+                                    st.session_state.column_mapping,
+                                    'As-Is Excl Suppliers'
+                                )
+                                as_is_excl_df.to_excel(writer, sheet_name='As-Is Excl Suppliers', index=False)
+                                logger.info("As-Is Excluding Suppliers analysis completed.")
+
+                        processed_data = output.getvalue()
+
+                    st.download_button(
+                        label="Download Analysis Results",
+                        data=processed_data,
+                        file_name="scenario_analysis_results.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    logger.info("Analysis results prepared for download.")
+            elif st.session_state.upload_mode == 'separate':
+                st.markdown("### Upload Baseline and Bid Files")
+
+                # Upload baseline file
+                baseline_file = st.file_uploader("Upload Baseline Sheet", type=["xlsx"], key='baseline_file')
+                num_files = st.number_input("Number of Bid Sheets to Upload", min_value=1, step=1, key='num_bid_files')
+
+                bid_files_suppliers = []
+                for i in range(int(num_files)):
+                    bid_file = st.file_uploader(f"Upload Bid Sheet {i + 1}", type=["xlsx"], key=f'bid_file_{i}')
+                    supplier_name = st.text_input(f"Supplier Name for Bid Sheet {i + 1}", key=f'supplier_name_{i}')
+                    if bid_file and supplier_name:
+                        bid_files_suppliers.append((bid_file, supplier_name))
+                        logger.info(f"Uploaded Bid Sheet {i + 1} for supplier '{supplier_name}'.")
+
+                # Merge Data
+                if st.button("Merge Data"):
+                    if validate_uploaded_file(baseline_file) and bid_files_suppliers:
+                        baseline_data = load_baseline_data(baseline_file)
+                        if baseline_data is not None:
+                            merged_data = start_process(baseline_data, bid_files_suppliers)
+                            if merged_data is not None:
+                                st.session_state.merged_data = merged_data
+                                st.session_state.original_merged_data = merged_data.copy()
+                                st.session_state.columns = list(merged_data.columns)
+                                st.session_state.baseline_data = baseline_data
+                                st.success("Data Merged Successfully. Please map the columns for analysis.")
+                                logger.info("Data merged successfully.")
+
+                if st.session_state.merged_data is not None:
+                    required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
+
+                    # Ensure column_mapping persists
+                    if not st.session_state.column_mapping or set(st.session_state.column_mapping.keys()) != set(required_columns):
+                        st.session_state.column_mapping = auto_map_columns(st.session_state.merged_data, required_columns)
+
+                    st.write("### Map the Following Columns:")
+                    for col in required_columns:
+                        st.session_state.column_mapping[col] = st.selectbox(
+                            f"Select Column for {col}",
+                            st.session_state.merged_data.columns,
+                            key=f"{col}_mapping_separate"
+                        )
+
+                    analyses_to_run = st.multiselect(
+                        "Select Scenario Analyses to Run",
+                        [
+                            "As-Is",
+                            "Best of Best",
+                            "Best of Best Excluding Suppliers",
+                            "As-Is Excluding Suppliers"
+                        ]
+                    )
+
+                    # Exclusion rules for Best of Best Excluding Suppliers
+                    if "Best of Best Excluding Suppliers" in analyses_to_run:
+                        with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
+                            st.header("Exclusion Rules for Best of Best Excluding Suppliers")
+
+                            supplier_name = st.selectbox(
+                                "Select Supplier to Exclude",
+                                st.session_state.merged_data['Awarded Supplier'].unique(),
+                                key="supplier_name_excl_bob_separate"
+                            )
+                            field = st.selectbox(
+                                "Select Field for Rule",
+                                st.session_state.merged_data.columns,
+                                key="field_excl_bob_separate"
+                            )
+                            logic = st.selectbox(
+                                "Select Logic (Equal to or Not equal to)",
+                                ["Equal to", "Not equal to"],
+                                key="logic_excl_bob_separate"
+                            )
+                            value = st.selectbox(
+                                "Select Value",
+                                st.session_state.merged_data[field].unique(),
+                                key="value_excl_bob_separate"
+                            )
+                            exclude_all = st.checkbox(
+                                "Exclude from all Bid IDs",
+                                key="exclude_all_excl_bob_separate"
+                            )
+
+                            if st.button("Add Exclusion Rule for Best of Best Excl Suppliers", key="add_excl_bob_separate"):
+                                if 'exclusions_bob' not in st.session_state:
+                                    st.session_state.exclusions_bob = []
+                                st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
+                                logger.debug(f"Added exclusion rule for Best of Best Excluding Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
+
+                            if st.button("Clear Exclusion Rules for Best of Best Excl Suppliers", key="clear_excl_bob_separate"):
+                                st.session_state.exclusions_bob = []
+                                logger.debug("Cleared all exclusion rules for Best of Best Excluding Suppliers.")
+
+                            if 'exclusions_bob' in st.session_state and st.session_state.exclusions_bob:
+                                st.write("**Current Exclusion Rules for Best of Best Excluding Suppliers:**")
+                                for i, excl in enumerate(st.session_state.exclusions_bob):
+                                    formatted_rule = format_exclusion_rule(excl)
+                                    st.write(f"{i + 1}. {formatted_rule}")
+
+
+                    # Exclusion rules for As-Is Excluding Suppliers
+                    if "As-Is Excluding Suppliers" in analyses_to_run:
+                        with st.expander("Configure Exclusion Rules for As-Is Excluding Suppliers"):
+                            st.header("Exclusion Rules for As-Is Excluding Suppliers")
+
+                            supplier_name_ais = st.selectbox(
+                                "Select Supplier to Exclude",
+                                st.session_state.merged_data['Awarded Supplier'].unique(),
+                                key="supplier_name_excl_ais_separate"
+                            )
+                            field_ais = st.selectbox(
+                                "Select Field for Rule",
+                                st.session_state.merged_data.columns,
+                                key="field_excl_ais_separate"
+                            )
+                            logic_ais = st.selectbox(
+                                "Select Logic (Equal to or Not equal to)",
+                                ["Equal to", "Not equal to"],
+                                key="logic_excl_ais_separate"
+                            )
+                            value_ais = st.selectbox(
+                                "Select Value",
+                                st.session_state.merged_data[field_ais].unique(),
+                                key="value_excl_ais_separate"
+                            )
+                            exclude_all_ais = st.checkbox(
+                                "Exclude from all Bid IDs",
+                                key="exclude_all_excl_ais_separate"
+                            )
+
+                            if st.button("Add Exclusion Rule for As-Is Excl Suppliers", key="add_excl_ais_separate"):
+                                if 'exclusions_ais' not in st.session_state:
+                                    st.session_state.exclusions_ais = []
+                                st.session_state.exclusions_ais.append((supplier_name_ais, field_ais, logic_ais, value_ais, exclude_all_ais))
+                                logger.debug(f"Added exclusion rule for As-Is Excluding Suppliers: {supplier_name_ais}, {field_ais}, {logic_ais}, {value_ais}, Exclude All: {exclude_all_ais}")
+
+                            if st.button("Clear Exclusion Rules for As-Is Excl Suppliers", key="clear_excl_ais_separate"):
+                                st.session_state.exclusions_ais = []
+                                logger.debug("Cleared all exclusion rules for As-Is Excluding Suppliers.")
+
+                            if 'exclusions_ais' in st.session_state and st.session_state.exclusions_ais:
+                                st.write("**Current Exclusion Rules for As-Is Excluding Suppliers:**")
+                                for i, excl in enumerate(st.session_state.exclusions_ais):
+                                    formatted_rule = format_exclusion_rule(excl)
+                                    st.write(f"{i + 1}. {formatted_rule}")
+
+
+                if st.button("Run Analysis"):
+                    with st.spinner("Running analysis..."):
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            baseline_data = st.session_state.baseline_data
+                            original_merged_data = st.session_state.original_merged_data
+
+                            if "As-Is" in analyses_to_run:
+                                as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
+                                as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
+                                as_is_df.to_excel(writer, sheet_name='As-Is', index=False)
+                                logger.info("As-Is analysis completed.")
+
+                            if "Best of Best" in analyses_to_run:
+                                best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
+                                best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
+                                best_of_best_df.to_excel(writer, sheet_name='Best of Best', index=False)
+                                logger.info("Best of Best analysis completed.")
+
+                            if "Best of Best Excluding Suppliers" in analyses_to_run:
+                                exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
+                                best_of_best_excl_df = best_of_best_excluding_suppliers(
+                                    st.session_state.merged_data,
+                                    st.session_state.column_mapping,
+                                    exclusions_list_bob
+                                )
+                                best_of_best_excl_df = add_missing_bid_ids(
+                                    best_of_best_excl_df,
+                                    original_merged_data,
+                                    st.session_state.column_mapping,
+                                    'BOB Excl Suppliers'
+                                )
+                                best_of_best_excl_df.to_excel(writer, sheet_name='BOB Excl Suppliers', index=False)
+                                logger.info("Best of Best Excluding Suppliers analysis completed.")
+
+                            if "As-Is Excluding Suppliers" in analyses_to_run:
+                                exclusions_list_ais = st.session_state.exclusions_ais if 'exclusions_ais' in st.session_state else []
+                                as_is_excl_df = as_is_excluding_suppliers_analysis(
+                                    st.session_state.merged_data,
+                                    st.session_state.column_mapping,
+                                    exclusions_list_ais
+                                )
+                                as_is_excl_df = add_missing_bid_ids(
+                                    as_is_excl_df,
+                                    original_merged_data,
+                                    st.session_state.column_mapping,
+                                    'As-Is Excl Suppliers'
+                                )
+                                as_is_excl_df.to_excel(writer, sheet_name='As-Is Excl Suppliers', index=False)
+                                logger.info("As-Is Excluding Suppliers analysis completed.")
+
+                        processed_data = output.getvalue()
+
+                    st.download_button(
+                        label="Download Analysis Results",
+                        data=processed_data,
+                        file_name="scenario_analysis_results.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    logger.info("Analysis results prepared for download.")
 
     elif section == 'project_folder':
         if st.session_state.selected_project and st.session_state.selected_subfolder:
@@ -1088,6 +1481,7 @@ def main():
                         if path_buttons[i].button(component, key=key):
                             st.session_state.selected_subfolder = None
                             # Update the page title
+
                     else:
                         # Disabled button for current folder
                         path_buttons[i].button(component, disabled=True, key=key+'_current')
@@ -1154,6 +1548,7 @@ def main():
                 if st.button(subfolder, key=f"subfolder_{subfolder}"):
                     st.session_state.selected_subfolder = subfolder
                     # Update the page title
+                    logger.info(f"Selected subfolder: {subfolder}")
 
         else:
             st.error("No project selected.")
@@ -1173,4 +1568,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
