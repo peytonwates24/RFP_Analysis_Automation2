@@ -1223,29 +1223,48 @@ def main():
                     st.error(f"Error loading merged data: {e}")
                     logger.error(f"Error loading merged data: {e}")
         
-        # Proceed to Column Mapping if merged_data is available
-        if st.session_state.merged_data is not None:
-            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
-        
-            # Ensure column_mapping persists
-            if 'column_mapping' not in st.session_state:
-                st.session_state.column_mapping = {}
-        
-            # Add a check to only create mapping widgets once
-            if 'column_mapping_initialized' not in st.session_state:
-                st.write("Map the following columns:")
-                for col in required_columns:
-                    st.session_state.column_mapping[col] = st.selectbox(
-                        f"Select Column for {col}",
-                        st.session_state.merged_data.columns,
-                        key=f"{col}_mapping"
-                    )
-                st.session_state.column_mapping_initialized = True
-            else:
-                st.write("Column mappings have been set.")
+# Proceed to Column Mapping if merged_data is available
+if st.session_state.merged_data is not None:
+    required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price',
+                        'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
 
+    # Initialize column_mapping if it doesn't exist
+    if 'column_mapping' not in st.session_state:
+        st.session_state.column_mapping = {}
+        st.session_state.column_mapping_complete = False
+
+    # Function to display the column mapping widgets
+    def display_column_mapping():
+        st.write("Map the following columns:")
+        for col in required_columns:
+            st.session_state.column_mapping[col] = st.selectbox(
+                f"Select Column for {col}",
+                st.session_state.merged_data.columns,
+                index=st.session_state.merged_data.columns.get_loc(
+                    st.session_state.column_mapping.get(col, st.session_state.merged_data.columns[0])),
+                key=f"{col}_mapping"
+            )
+        st.session_state.column_mapping_complete = True
+
+    # Check if column mapping is complete
+    if not st.session_state.get('column_mapping_complete', False):
+        display_column_mapping()
+    else:
+        # Provide options to proceed or remap columns
+        st.write("Column mappings have been set.")
+        if st.button("Remap Columns"):
+            # Reset the mapping flag to display mapping widgets again
+            st.session_state.column_mapping_complete = False
+            # Clear existing mappings
+            for col in required_columns:
+                if f"{col}_mapping" in st.session_state:
+                    del st.session_state[f"{col}_mapping"]
+            # Force a rerun to reset the widgets
+            st.experimental_rerun()
+        else:
             # After mapping, set 'Awarded Supplier' automatically
-            st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']]
+            st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[
+                st.session_state.column_mapping['Supplier Name']]
 
             analyses_to_run = st.multiselect("Select Scenario Analyses to Run", [
                 "As-Is",
