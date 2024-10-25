@@ -1222,22 +1222,27 @@ def main():
                 except Exception as e:
                     st.error(f"Error loading merged data: {e}")
                     logger.error(f"Error loading merged data: {e}")
-
+        
         # Proceed to Column Mapping if merged_data is available
         if st.session_state.merged_data is not None:
             required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
-
+        
             # Ensure column_mapping persists
-            if not st.session_state.column_mapping or set(st.session_state.column_mapping.keys()) != set(required_columns):
-                st.session_state.column_mapping = auto_map_columns(st.session_state.merged_data, required_columns)
-
-            st.write("Map the following columns:")
-            for col in required_columns:
-                st.session_state.column_mapping[col] = st.selectbox(
-                    f"Select Column for {col}",
-                    st.session_state.merged_data.columns,
-                    key=f"{col}_mapping"
-                )
+            if 'column_mapping' not in st.session_state:
+                st.session_state.column_mapping = {}
+        
+            # Add a check to only create mapping widgets once
+            if 'column_mapping_initialized' not in st.session_state:
+                st.write("Map the following columns:")
+                for col in required_columns:
+                    st.session_state.column_mapping[col] = st.selectbox(
+                        f"Select Column for {col}",
+                        st.session_state.merged_data.columns,
+                        key=f"{col}_mapping"
+                    )
+                st.session_state.column_mapping_initialized = True
+            else:
+                st.write("Column mappings have been set.")
 
             # After mapping, set 'Awarded Supplier' automatically
             st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']]
