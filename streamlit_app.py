@@ -1121,7 +1121,6 @@ def main():
         st.write("Upload your data here.")
 
         # Select data input method
-        # Do not assign the result to st.session_state
         data_input_method = st.radio(
             "Select Data Input Method",
             ('Separate Bid & Baseline files', 'Merged Data'),
@@ -1186,9 +1185,7 @@ def main():
                             st.session_state.original_merged_data = merged_data.copy()
                             st.session_state.columns = list(merged_data.columns)
                             st.session_state.baseline_data = load_baseline_data(baseline_file, baseline_sheet)
-                            # Automatically set 'Awarded Supplier' from 'Supplier Name'
-                            st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']]
-                            st.success("Data Merged Successfully. Please map the columns for analysis.")
+                            st.success("Data merged successfully. Please map the columns for analysis.")
                             logger.info("Data merged successfully.")
 
         else:
@@ -1225,12 +1222,14 @@ def main():
 
         # Proceed to Column Mapping if merged_data is available
         if st.session_state.merged_data is not None:
-            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
+            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price',
+                                'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
 
-            # Ensure column_mapping persists
-            if not st.session_state.column_mapping or set(st.session_state.column_mapping.keys()) != set(required_columns):
-                st.session_state.column_mapping = auto_map_columns(st.session_state.merged_data, required_columns)
+            # Initialize column_mapping if not already initialized
+            if 'column_mapping' not in st.session_state:
+                st.session_state.column_mapping = {}
 
+            # Map columns
             st.write("Map the following columns:")
             for col in required_columns:
                 st.session_state.column_mapping[col] = st.selectbox(
@@ -1239,8 +1238,14 @@ def main():
                     key=f"{col}_mapping"
                 )
 
-            # After mapping, set 'Awarded Supplier' automatically
-            st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']]
+            # After mapping, check if all required columns are mapped
+            missing_columns = [col for col in required_columns if col not in st.session_state.column_mapping or st.session_state.column_mapping[col] not in st.session_state.merged_data.columns]
+            if missing_columns:
+                st.error(f"The following required columns are not mapped or do not exist in the data: {', '.join(missing_columns)}")
+            else:
+                # After mapping, set 'Awarded Supplier' automatically
+                st.session_state.merged_data['Awarded Supplier'] = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']]
+
 
             analyses_to_run = st.multiselect("Select Scenario Analyses to Run", [
                 "As-Is",
@@ -1248,7 +1253,7 @@ def main():
                 "Best of Best Excluding Suppliers",
                 "As-Is Excluding Suppliers",
                 "Bid Coverage Report",
-                "Customizable Analysis"  # Added new analysis option
+                "Customizable Analysis"
             ])
 
 
