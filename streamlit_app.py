@@ -10,6 +10,10 @@ from pathlib import Path
 import shutil
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.workbook.defined_name import DefinedName
+from openpyxl.styles import Font
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter, column_index_from_string
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -807,7 +811,7 @@ def customizable_analysis(data, column_mapping):
     # Get unique Bid IDs
     bid_ids = data[bid_id_col].unique()
 
-    # Prepare the customizable analysis DataFrame
+ # Prepare the customizable analysis DataFrame
     customizable_list = []
     for bid_id in bid_ids:
         bid_row = data[data[bid_id_col] == bid_id].iloc[0]
@@ -819,6 +823,7 @@ def customizable_analysis(data, column_mapping):
             'Bid Volume': bid_row[bid_volume_col],
             'Baseline Spend': bid_row['Baseline Spend'],
             'Awarded Supplier': '',  # To be selected via data validation in Excel
+            'Supplier Name': '',     # New column added here
             'Awarded Supplier Price': None,  # Formula-based
             'Awarded Volume': None,  # Formula-based
             'Awarded Supplier Spend': None,  # Formula-based
@@ -945,6 +950,8 @@ def main():
         st.session_state.selected_project = None
     if 'selected_subfolder' not in st.session_state:
         st.session_state.selected_subfolder = None
+    if 'customizable_grouping_column' not in st.session_state:
+        st.session_state.customizable_grouping_column = None
 
     # Header with logo and page title
     st.markdown(
@@ -1324,6 +1331,31 @@ def main():
                     # Select group by field
                     group_by_field = st.selectbox("Group by", st.session_state.merged_data.columns, key="bid_coverage_group_by")
 
+
+            if "Customizable Analysis" in analyses_to_run:
+                with st.expander("Configure Customizable Analysis"):
+                    st.header("Customizable Analysis Configuration")
+                    # Select Grouping Column
+                    grouping_column_raw = st.selectbox(
+                        "Select Grouping Column",
+                        st.session_state.merged_data.columns,
+                        key="customizable_grouping_column"
+                    )
+                    
+                    # Check if the selected grouping column is already mapped
+                    grouping_column_already_mapped = False
+                    grouping_column_mapped = grouping_column_raw  # Default to raw name
+                    for standard_col, mapped_col in st.session_state.column_mapping.items():
+                        if mapped_col == grouping_column_raw:
+                            grouping_column_mapped = standard_col
+                            grouping_column_already_mapped = True
+                            break
+                    
+                    # Store both the raw and mapped grouping column names and the flag
+                    st.session_state.grouping_column_raw = grouping_column_raw
+                    st.session_state.grouping_column_mapped = grouping_column_mapped
+                    st.session_state.grouping_column_already_mapped = grouping_column_already_mapped
+
             if st.button("Run Analysis"):
                 with st.spinner("Running analysis..."):
                     output = BytesIO()
@@ -1331,18 +1363,21 @@ def main():
                         baseline_data = st.session_state.baseline_data
                         original_merged_data = st.session_state.original_merged_data
 
+                        # As-Is Analysis
                         if "As-Is" in analyses_to_run:
                             as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                             as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
                             as_is_df.to_excel(writer, sheet_name='As-Is', index=False)
                             logger.info("As-Is analysis completed.")
 
+                        # Best of Best Analysis
                         if "Best of Best" in analyses_to_run:
                             best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                             best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
                             best_of_best_df.to_excel(writer, sheet_name='Best of Best', index=False)
                             logger.info("Best of Best analysis completed.")
 
+                        # Best of Best Excluding Suppliers Analysis
                         if "Best of Best Excluding Suppliers" in analyses_to_run:
                             exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
                             best_of_best_excl_df = best_of_best_excluding_suppliers(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_bob)
@@ -1350,6 +1385,7 @@ def main():
                             best_of_best_excl_df.to_excel(writer, sheet_name='BOB Excl Suppliers', index=False)
                             logger.info("Best of Best Excluding Suppliers analysis completed.")
 
+                        # As-Is Excluding Suppliers Analysis
                         if "As-Is Excluding Suppliers" in analyses_to_run:
                             exclusions_list_ais = st.session_state.exclusions_ais if 'exclusions_ais' in st.session_state else []
                             as_is_excl_df = as_is_excluding_suppliers_analysis(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_ais)
@@ -1395,47 +1431,117 @@ def main():
                             else:
                                 st.warning("No Bid Coverage Report variations selected.")
 
+
                         if "Customizable Analysis" in analyses_to_run:
+                            # Generate the customizable analysis DataFrame
                             customizable_df = customizable_analysis(st.session_state.merged_data, st.session_state.column_mapping)
+
+                            # Define raw and mapped grouping column names
+                            grouping_column_raw = st.session_state.grouping_column_raw  # e.g., 'Facility'
+                            grouping_column_mapped = st.session_state.grouping_column_mapped  # e.g., 'Plant'
+
+                            # If grouping column was not already mapped, add it to customizable_df
+                            if not st.session_state.grouping_column_already_mapped:
+                                if grouping_column_mapped not in customizable_df.columns:
+                                    # Add the grouping column next to 'Bid ID'
+                                    bid_id_idx = customizable_df.columns.get_loc('Bid ID')
+                                    customizable_df.insert(bid_id_idx + 1, grouping_column_mapped, '')
+
                             # Write 'Customizable Template' sheet
                             customizable_df.to_excel(writer, sheet_name='Customizable Template', index=False)
+
+                            # Prepare 'Customizable Reference' DataFrame
+                            customizable_reference_df = st.session_state.merged_data.copy()
+
+                            # If grouping column was not already mapped, add it to customizable_reference_df
+                            if not st.session_state.grouping_column_already_mapped:
+                                if grouping_column_mapped not in customizable_reference_df.columns:
+                                    # Use 'grouping_column_mapped' instead of 'grouping_column_raw' to access the actual column name
+                                    bid_id_to_grouping = st.session_state.merged_data.set_index(
+                                        st.session_state.column_mapping['Bid ID']
+                                    )[grouping_column_mapped].to_dict()
+                                    customizable_reference_df[grouping_column_mapped] = customizable_reference_df[
+                                        st.session_state.column_mapping['Bid ID']
+                                    ].map(bid_id_to_grouping)
+
                             # Write 'Customizable Reference' sheet
-                            st.session_state.merged_data.to_excel(writer, sheet_name='Customizable Reference', index=False)
+                            customizable_reference_df.to_excel(writer, sheet_name='Customizable Reference', index=False)
                             logger.info("Customizable Analysis data prepared.")
-                        
-                            # Access the workbook and sheets
+
+                            # ======= Ensure 'Scenario Converter' Sheet Exists =======
+                            if 'Scenario Converter' not in writer.book.sheetnames:
+                                # Create 'Scenario Converter' sheet with 'Bid ID' and empty scenario columns
+                                bid_ids = st.session_state.merged_data[st.session_state.column_mapping['Bid ID']].unique()
+                                scenario_converter_df = pd.DataFrame({'Bid ID': bid_ids})
+                                for i in range(1, 8):
+                                    scenario_converter_df[f'Scenario {i}'] = ''  # Initialize empty columns
+                                scenario_converter_df.to_excel(writer, sheet_name='Scenario Converter', index=False)
+                                logger.info("'Scenario Converter' sheet created.")
+                            else:
+                                logger.info("'Scenario Converter' sheet already exists.")
+
+                            # ======= Ensure Grouping Column Exists in 'merged_data' =======
+                            if not st.session_state.grouping_column_already_mapped:
+                                if grouping_column_mapped not in st.session_state.merged_data.columns:
+                                    # Use 'grouping_column_mapped' instead of 'grouping_column_raw' to access the actual column name
+                                    st.session_state.merged_data[grouping_column_mapped] = st.session_state.merged_data[
+                                        st.session_state.column_mapping['Bid ID']
+                                    ].map(bid_id_to_grouping)
+                                    logger.info(f"Added grouping column '{grouping_column_mapped}' to 'merged_data'.")
+
+                            # ======= Access the Workbook and Sheets =======
                             workbook = writer.book
                             customizable_template_sheet = workbook['Customizable Template']
                             customizable_reference_sheet = workbook['Customizable Reference']
-                        
+                            scenario_converter_sheet = workbook['Scenario Converter']
+
                             # Get the max row numbers
                             max_row_template = customizable_template_sheet.max_row
                             max_row_reference = customizable_reference_sheet.max_row
-                        
-                            # Create dictionaries to map column names to letters in 'Customizable Reference' and 'Customizable Template'
-                            reference_col_letter = {cell.value: cell.column_letter for cell in customizable_reference_sheet[1]}
-                            template_col_letter = {cell.value: cell.column_letter for cell in customizable_template_sheet[1]}
-                        
-                            # Create supplier lists per Bid ID in hidden sheet
-                            supplier_list_sheet = workbook.create_sheet("SupplierLists")
-                        
+                            max_row_converter = scenario_converter_sheet.max_row
+
+                            # Map column names to letters in 'Customizable Reference' sheet
+                            reference_col_letter = {cell.value: get_column_letter(cell.column) for cell in customizable_reference_sheet[1]}
+                            # Map column names to letters in 'Customizable Template' sheet
+                            template_col_letter = {cell.value: get_column_letter(cell.column) for cell in customizable_template_sheet[1]}
+
+                            # Get the column letters for the grouping column in 'Customizable Reference' sheet
+                            ref_grouping_col = reference_col_letter.get(grouping_column_mapped)
+                            # Get the column letters for the grouping column in 'Customizable Template' sheet
+                            temp_grouping_col = template_col_letter.get(grouping_column_mapped)
+
+                            # Update 'Supplier Name' formulas in 'Customizable Template' sheet
+                            awarded_supplier_col_letter = template_col_letter['Awarded Supplier']
+                            supplier_name_col_letter = template_col_letter['Supplier Name']
+
+                            for row in range(2, max_row_template + 1):
+                                awarded_supplier_cell = f"{awarded_supplier_col_letter}{row}"
+                                supplier_name_cell = f"{supplier_name_col_letter}{row}"
+                                # Corrected formula syntax with closing parenthesis
+                                formula_supplier_name = f'=IF({awarded_supplier_cell}<>"", LEFT({awarded_supplier_cell}, FIND("(", {awarded_supplier_cell}) - 2), "")'
+                                customizable_template_sheet[supplier_name_cell].value = formula_supplier_name
+
+                            # Create supplier lists per Bid ID in a hidden sheet
+                            if 'SupplierLists' not in workbook.sheetnames:
+                                supplier_list_sheet = workbook.create_sheet("SupplierLists")
+                            else:
+                                supplier_list_sheet = workbook['SupplierLists']
+
                             bid_id_col_reference = st.session_state.column_mapping['Bid ID']
-                            supplier_name_with_bid_price_col_reference = 'Supplier Name with Bid Price'
-                        
-                            # Create a dictionary to keep track of supplier list ranges per Bid ID
+                            supplier_name_with_bid_price_col_reference = st.session_state.column_mapping.get('Supplier Name with Bid Price', 'Supplier Name with Bid Price')
                             bid_id_supplier_list_ranges = {}
-                        
-                            current_row = 1  # Starting row in SupplierLists sheet
-                        
+                            current_row = 1
+
                             bid_ids = st.session_state.merged_data[bid_id_col_reference].unique()
-                            data = st.session_state.merged_data  # For convenience
-                        
+                            data = st.session_state.merged_data
+
                             for bid_id in bid_ids:
                                 bid_data = data[data[bid_id_col_reference] == bid_id]
-                                # Exclude suppliers with zero or empty Bid Price
-                                bid_data_filtered = bid_data[(bid_data[st.session_state.column_mapping['Bid Price']].notna()) & (bid_data[st.session_state.column_mapping['Bid Price']] != 0)]
+                                bid_data_filtered = bid_data[
+                                    (bid_data[st.session_state.column_mapping['Bid Price']].notna()) &
+                                    (bid_data[st.session_state.column_mapping['Bid Price']] != 0)
+                                ]
                                 if not bid_data_filtered.empty:
-                                    # Sort bid_data by bid price ascending
                                     bid_data_sorted = bid_data_filtered.sort_values(by=st.session_state.column_mapping['Bid Price'])
                                     suppliers = bid_data_sorted[supplier_name_with_bid_price_col_reference].dropna().tolist()
                                     start_row = current_row
@@ -1443,130 +1549,406 @@ def main():
                                         supplier_list_sheet.cell(row=current_row, column=1, value=supplier)
                                         current_row += 1
                                     end_row = current_row - 1
-                                    # Record the range for data validation
                                     bid_id_supplier_list_ranges[bid_id] = (start_row, end_row)
-                                    # Add an empty row for separation
-                                    current_row += 1
+                                    current_row += 1  # Empty row for separation
                                 else:
-                                    # No valid suppliers for this Bid ID
                                     bid_id_supplier_list_ranges[bid_id] = None
-                        
+
                             # Hide the 'SupplierLists' sheet
                             supplier_list_sheet.sheet_state = 'hidden'
-                        
-                            # Now, set data validation and formulas in 'Customizable Template' sheet
-                            supplier_name_with_bid_price_col_ref = reference_col_letter['Supplier Name with Bid Price']
-                            bid_price_col_ref = reference_col_letter[st.session_state.column_mapping['Bid Price']]
-                            supplier_capacity_col_ref = reference_col_letter[st.session_state.column_mapping['Supplier Capacity']]
-                            bid_volume_col_template = template_col_letter['Bid Volume']
-                            baseline_price_col_template = template_col_letter['Baseline Price']
-                        
-                            supplier_name_with_bid_price_range = f"'Customizable Reference'!${supplier_name_with_bid_price_col_ref}$2:${supplier_name_with_bid_price_col_ref}${max_row_reference}"
-                            bid_price_range = f"'Customizable Reference'!${bid_price_col_ref}$2:${bid_price_col_ref}${max_row_reference}"
-                            supplier_capacity_range = f"'Customizable Reference'!${supplier_capacity_col_ref}$2:${supplier_capacity_col_ref}${max_row_reference}"
-                        
+
+                            # Set data validation and formulas in 'Customizable Template' sheet
+                            ref_sheet_name = 'Customizable Reference'
+                            temp_sheet_name = 'Customizable Template'
+
+                            ref_bid_id_col = reference_col_letter[st.session_state.column_mapping['Bid ID']]
+                            ref_supplier_name_col = reference_col_letter[st.session_state.column_mapping['Supplier Name']]
+                            ref_bid_price_col = reference_col_letter[st.session_state.column_mapping['Bid Price']]
+                            ref_supplier_capacity_col = reference_col_letter[st.session_state.column_mapping['Supplier Capacity']]
+                            ref_supplier_name_with_bid_price_col = reference_col_letter.get(supplier_name_with_bid_price_col_reference, 'A')  # Default to 'A' if not found
+
+                            temp_bid_id_col = template_col_letter['Bid ID']
+                            temp_supplier_name_col = template_col_letter['Supplier Name']
+                            temp_bid_volume_col = template_col_letter['Bid Volume']
+                            temp_baseline_price_col = template_col_letter['Baseline Price']
+
                             for row in range(2, max_row_template + 1):
-                                bid_id_cell = customizable_template_sheet[f"{template_col_letter['Bid ID']}{row}"]
-                                bid_id = bid_id_cell.value
-                                awarded_supplier_cell = f"{template_col_letter['Awarded Supplier']}{row}"
-                        
-                                if bid_id in bid_id_supplier_list_ranges and bid_id_supplier_list_ranges[bid_id]:
-                                    start_row, end_row = bid_id_supplier_list_ranges[bid_id]
+                                bid_id_cell = f"{temp_bid_id_col}{row}"
+                                awarded_supplier_cell = f"{awarded_supplier_col_letter}{row}"
+                                supplier_name_cell = f"{temp_supplier_name_col}{row}"
+                                bid_volume_cell = f"{temp_bid_volume_col}{row}"
+                                baseline_price_cell = f"{temp_baseline_price_col}{row}"
+                                grouping_cell = f"{temp_grouping_col}{row}" if temp_grouping_col else None
+
+                                bid_id_value = customizable_template_sheet[bid_id_cell].value
+
+                                if bid_id_value in bid_id_supplier_list_ranges and bid_id_supplier_list_ranges[bid_id_value]:
+                                    start_row, end_row = bid_id_supplier_list_ranges[bid_id_value]
                                     supplier_list_range = f"'SupplierLists'!$A${start_row}:$A${end_row}"
-                        
+
                                     # Set data validation for 'Awarded Supplier'
                                     dv = DataValidation(type="list", formula1=f"{supplier_list_range}", allow_blank=True)
                                     customizable_template_sheet.add_data_validation(dv)
-                                    dv.add(customizable_template_sheet[f"{template_col_letter['Awarded Supplier']}{row}"])
-                        
-                                    # Formulas using INDEX MATCH
+                                    dv.add(customizable_template_sheet[awarded_supplier_cell])
+
+                                    # Construct the formulas using SUMIFS
                                     # Awarded Supplier Price
                                     formula_price = (
-                                        f"=IFERROR(INDEX({bid_price_range}, MATCH({awarded_supplier_cell}, {supplier_name_with_bid_price_range}, 0)),\"\")"
+                                        f"=IFERROR(SUMIFS('{ref_sheet_name}'!{ref_bid_price_col}:{ref_bid_price_col}, "
+                                        f"'{ref_sheet_name}'!{ref_bid_id_col}:{ref_bid_id_col}, {bid_id_cell}, "
+                                        f"'{ref_sheet_name}'!{ref_supplier_name_col}:{ref_supplier_name_col}, {supplier_name_cell}), \"\")"
                                     )
-                                    customizable_template_sheet[f"{template_col_letter['Awarded Supplier Price']}{row}"].value = formula_price
-                        
+                                    awarded_supplier_price_cell = f"{template_col_letter['Awarded Supplier Price']}{row}"
+                                    customizable_template_sheet[awarded_supplier_price_cell].value = formula_price
+
                                     # Awarded Supplier Capacity
                                     formula_supplier_capacity = (
-                                        f"=IFERROR(INDEX({supplier_capacity_range}, MATCH({awarded_supplier_cell}, {supplier_name_with_bid_price_range}, 0)),\"\")"
+                                        f"=IFERROR(SUMIFS('{ref_sheet_name}'!{ref_supplier_capacity_col}:{ref_supplier_capacity_col}, "
+                                        f"'{ref_sheet_name}'!{ref_bid_id_col}:{ref_bid_id_col}, {bid_id_cell}, "
+                                        f"'{ref_sheet_name}'!{ref_supplier_name_col}:{ref_supplier_name_col}, {supplier_name_cell}), \"\")"
                                     )
-                                    customizable_template_sheet[f"{template_col_letter['Awarded Supplier Capacity']}{row}"].value = formula_supplier_capacity
-                        
-                                    # Awarded Volume: MIN(Bid Volume, Awarded Supplier Capacity)
-                                    formula_awarded_volume = (
-                                        f"=IFERROR(MIN({template_col_letter['Bid Volume']}{row}, {template_col_letter['Awarded Supplier Capacity']}{row}),\"\")"
-                                    )
-                                    customizable_template_sheet[f"{template_col_letter['Awarded Volume']}{row}"].value = formula_awarded_volume
-                        
+                                    awarded_supplier_capacity_cell = f"{template_col_letter['Awarded Supplier Capacity']}{row}"
+                                    customizable_template_sheet[awarded_supplier_capacity_cell].value = formula_supplier_capacity
+
+                                    # Awarded Volume
+                                    awarded_volume_cell = f"{template_col_letter['Awarded Volume']}{row}"
+                                    formula_awarded_volume = f"=IFERROR(MIN({bid_volume_cell}, {awarded_supplier_capacity_cell}), \"\")"
+                                    customizable_template_sheet[awarded_volume_cell].value = formula_awarded_volume
+
                                     # Awarded Supplier Spend
-                                    formula_spend = (
-                                        f"=IF({template_col_letter['Awarded Supplier Price']}{row}<>\"\", "
-                                        f"{template_col_letter['Awarded Supplier Price']}{row}*{template_col_letter['Awarded Volume']}{row},\"\")"
-                                    )
-                                    customizable_template_sheet[f"{template_col_letter['Awarded Supplier Spend']}{row}"].value = formula_spend
-                        
+                                    awarded_supplier_spend_cell = f"{template_col_letter['Awarded Supplier Spend']}{row}"
+                                    formula_spend = f"=IF({awarded_supplier_price_cell}<>\"\", {awarded_supplier_price_cell}*{awarded_volume_cell}, \"\")"
+                                    customizable_template_sheet[awarded_supplier_spend_cell].value = formula_spend
+
                                     # Savings
-                                    formula_savings = (
-                                        f"=IF({template_col_letter['Awarded Supplier Price']}{row}<>\"\", "
-                                        f"({template_col_letter['Baseline Price']}{row}-{template_col_letter['Awarded Supplier Price']}{row})*{template_col_letter['Awarded Volume']}{row},\"\")"
-                                    )
-                                    customizable_template_sheet[f"{template_col_letter['Savings']}{row}"].value = formula_savings
-                        
+                                    savings_cell = f"{template_col_letter['Savings']}{row}"
+                                    formula_savings = f"=IF({awarded_supplier_price_cell}<>\"\", ({baseline_price_cell}-{awarded_supplier_price_cell})*{awarded_volume_cell}, \"\")"
+                                    customizable_template_sheet[savings_cell].value = formula_savings
+
                                     # Baseline Spend
-                                    formula_baseline_spend = f"={baseline_price_col_template}{row}*{bid_volume_col_template}{row}"
-                                    customizable_template_sheet[f"{template_col_letter['Baseline Spend']}{row}"].value = formula_baseline_spend
+                                    baseline_spend_cell = f"{template_col_letter['Baseline Spend']}{row}"
+                                    formula_baseline_spend = f"={baseline_price_cell}*{bid_volume_cell}"
+                                    customizable_template_sheet[baseline_spend_cell].value = formula_baseline_spend
+
+                                    # If grouping column exists, populate it
+                                    if grouping_cell and ref_grouping_col:
+                                        col_index = column_index_from_string(ref_grouping_col) - column_index_from_string(ref_bid_id_col) + 1
+                                        formula_grouping = (
+                                            f"=IFERROR(VLOOKUP({bid_id_cell}, '{ref_sheet_name}'!{ref_bid_id_col}:{ref_grouping_col}, "
+                                            f"{col_index}, FALSE), \"\")"
+                                        )
+                                        customizable_template_sheet[grouping_cell].value = formula_grouping
                                 else:
-                                    # No valid suppliers for this Bid ID
-                                    pass
-                        
+                                    pass  # No valid suppliers for this Bid ID
+
                             # Apply formatting to 'Customizable Reference' sheet
                             currency_columns_reference = ['Baseline Spend', 'Savings', st.session_state.column_mapping['Bid Price'], st.session_state.column_mapping['Baseline Price']]
                             number_columns_reference = [st.session_state.column_mapping['Bid Volume'], st.session_state.column_mapping['Supplier Capacity']]
-                        
+
                             for col_name in currency_columns_reference:
                                 col_letter = reference_col_letter.get(col_name)
                                 if col_letter:
                                     for row_num in range(2, max_row_reference + 1):
                                         cell = customizable_reference_sheet[f"{col_letter}{row_num}"]
                                         cell.number_format = '$#,##0.00'
-                        
+
                             for col_name in number_columns_reference:
                                 col_letter = reference_col_letter.get(col_name)
                                 if col_letter:
                                     for row_num in range(2, max_row_reference + 1):
                                         cell = customizable_reference_sheet[f"{col_letter}{row_num}"]
                                         cell.number_format = '#,##0'
-                        
+
                             # Apply formatting to 'Customizable Template' sheet
                             currency_columns_template = ['Baseline Spend', 'Baseline Price', 'Awarded Supplier Price', 'Awarded Supplier Spend', 'Savings']
                             number_columns_template = ['Bid Volume', 'Awarded Volume', 'Awarded Supplier Capacity']
-                        
+
                             for col_name in currency_columns_template:
                                 col_letter = template_col_letter.get(col_name)
                                 if col_letter:
                                     for row_num in range(2, max_row_template + 1):
                                         cell = customizable_template_sheet[f"{col_letter}{row_num}"]
                                         cell.number_format = '$#,##0.00'
-                        
+
                             for col_name in number_columns_template:
                                 col_letter = template_col_letter.get(col_name)
                                 if col_letter:
                                     for row_num in range(2, max_row_template + 1):
                                         cell = customizable_template_sheet[f"{col_letter}{row_num}"]
                                         cell.number_format = '#,##0'
-                        
-                            logger.info("Customizable Analysis completed.")
-                                            
 
+                            # ======= Create the Scenario Reports sheet =======
+                            # Check if 'Scenario Reports' sheet exists; if not, create it
+                            if 'Scenario Reports' not in workbook.sheetnames:
+                                scenario_reports_sheet = workbook.create_sheet('Scenario Reports')
+                            else:
+                                scenario_reports_sheet = workbook['Scenario Reports']
+
+                            # Define the starting row for group summaries
+                            starting_row = 4  # As per user instruction, first summary starts at A4
+
+                            # Determine the number of unique suppliers (can be dynamic)
+                            unique_suppliers = st.session_state.merged_data[st.session_state.column_mapping['Supplier Name']].unique()
+                            num_suppliers = len(unique_suppliers)
+
+                            # Get the grouping column name
+                            grouping_column = grouping_column_raw  # e.g., 'Plant'
+
+                            # ======= Create a Separate DataFrame for Scenario Reports =======
+                            # **Change:** Use 'customizable_reference_df' as the source instead of 'merged_data'
+                            if grouping_column not in customizable_reference_df.columns:
+                                st.error(f"Grouping column '{grouping_column}' not found in merged data.")
+                                logger.error(f"Grouping column '{grouping_column}' not found in merged data.")
+                            else:
+                                # Create scenario_reports_df with 'Bid ID', grouping column, and 'Supplier Name' from 'Customizable Reference'
+                                scenario_reports_df = customizable_reference_df[[st.session_state.column_mapping['Bid ID'], grouping_column, st.session_state.column_mapping['Supplier Name']]].copy()
+
+                                # Get unique grouping values
+                                unique_groups = scenario_reports_df[grouping_column].dropna().unique()
+
+                                for group in unique_groups:
+                                    # Insert Group Label
+                                    scenario_reports_sheet[f"A{starting_row}"] = group
+                                    scenario_reports_sheet[f"A{starting_row}"].font = Font(bold=True)
+
+                                    # Insert Header Row
+                                    headers = [
+                                        'Supplier Name',
+                                        'Awarded Volume',
+                                        '% of Business',
+                                        'Baseline Avg',
+                                        'Avg Bid Price',
+                                        '%Δ b/w Baseline and Avg Bid',
+                                        'RFP Savings'
+                                    ]
+                                    for col_num, header in enumerate(headers, start=1):
+                                        cell = scenario_reports_sheet.cell(row=starting_row + 1, column=col_num, value=header)
+                                        cell.font = Font(bold=True)
+
+
+                                    # ======= Insert Formula for Supplier Name in the First Supplier Row =======
+                                    supplier_name_cell = f"A{starting_row + 2}"  # Assigning to column A
+                                    # Dynamic reference to the group label cell within the 'Scenario Reports' sheet
+                                    group_label_cell = f"'Scenario Reports'!$A${starting_row}"
+
+                                    # Construct the formula with IFERROR to handle potential errors, without the leading '='
+                                    formula_supplier_name = (
+                                        f"IFERROR(UNIQUE(FILTER('Scenario Selector'!G:G, "
+                                        f"('Scenario Selector'!G:G<>\"\") * ('Scenario Selector'!B:B={group_label_cell}))), \"\")"
+                                    )
+
+                                    # Optional: Log the formula for debugging purposes
+                                    logger.info(f"Assigning formula to {supplier_name_cell}: {formula_supplier_name}")
+
+                                    # Assign the formula as text to the specified cell in the 'Scenario Reports' sheet
+                                    try:
+                                        scenario_reports_sheet[supplier_name_cell].value = formula_supplier_name
+                                        logger.info(f"Successfully assigned formula as text to {supplier_name_cell}")
+                                    except Exception as e:
+                                        logger.error(f"Failed to assign formula to {supplier_name_cell}: {e}")
+                                        st.error(f"An error occurred while assigning formulas to {supplier_name_cell}: {e}")
+
+
+
+                                    # ======= Insert Formulas for Other Columns in the First Supplier Row =======
+                                    awarded_volume_cell = f"B{starting_row + 2}"
+                                    percent_business_cell = f"C{starting_row + 2}"
+                                    avg_baseline_price_cell = f"D{starting_row + 2}"
+                                    avg_bid_price_cell = f"E{starting_row + 2}"
+                                    percent_delta_cell = f"F{starting_row + 2}"
+                                    rfp_savings_cell = f"G{starting_row + 2}"
+
+                                    # Awarded Volume Formula
+                                    formula_awarded_volume = (
+                                        f"=IF({supplier_name_cell}=\"\", \"\", SUMIFS('Scenario Selector'!$I:$I, "
+                                        f"'Scenario Selector'!$B:$B, {group_label_cell}, 'Scenario Selector'!$G:$G, {supplier_name_cell}))"
+                                    )
+                                    scenario_reports_sheet[awarded_volume_cell].value = formula_awarded_volume
+
+                                    # % of Business Formula
+                                    formula_percent_business = (
+                                        f"=IF({awarded_volume_cell}=0, \"\", {awarded_volume_cell}/SUMIFS('Scenario Selector'!$I:$I, "
+                                        f"'Scenario Selector'!$B:$B, {group_label_cell}))"
+                                    )
+                                    scenario_reports_sheet[percent_business_cell].value = formula_percent_business
+
+                                    # Avg Baseline Price Formula
+                                    formula_avg_baseline_price = (
+                                        f"=IF({supplier_name_cell}=\"\", \"\", AVERAGEIFS('Scenario Selector'!$D:$D, "
+                                        f"'Scenario Selector'!$B:$B, {group_label_cell}, 'Scenario Selector'!$G:$G, {supplier_name_cell}))"
+                                    )
+                                    scenario_reports_sheet[avg_baseline_price_cell].value = formula_avg_baseline_price
+
+                                    # Avg Bid Price Formula
+                                    formula_avg_bid_price = (
+                                        f"=IF({supplier_name_cell}=\"\", \"\", AVERAGEIFS('Scenario Selector'!$H:$H, "
+                                        f"'Scenario Selector'!$B:$B, {group_label_cell}, 'Scenario Selector'!$G:$G, {supplier_name_cell}))"
+                                    )
+                                    scenario_reports_sheet[avg_bid_price_cell].value = formula_avg_bid_price
+
+                                    # % Delta between Baseline and Avg Bid Formula
+                                    formula_percent_delta = (
+                                        f"=IF(AND({avg_baseline_price_cell}>0, {avg_bid_price_cell}>0), "
+                                        f"({avg_baseline_price_cell}-{avg_bid_price_cell})/{avg_baseline_price_cell}, \"\")"
+                                    )
+                                    scenario_reports_sheet[percent_delta_cell].value = formula_percent_delta
+
+                                    # RFP Savings Formula
+                                    formula_rfp_savings = (
+                                        f"=IF({supplier_name_cell}=\"\", \"\", AVERAGEIFS('Scenario Selector'!$L:$L, "
+                                        f"'Scenario Selector'!$B:$B, {group_label_cell}, 'Scenario Selector'!$G:$G, {supplier_name_cell}))"
+                                    )
+                                    scenario_reports_sheet[rfp_savings_cell].value = formula_rfp_savings
+
+                                    # ======= Advance the starting row =======
+                                    starting_row += 1 + 1 + 1 + 3  # Group label + header + first supplier row + spacing
+
+                            # ======= Add Drop-Down to 'Scenario Reports' Sheet =======
+                            # Restore the drop-down menu in cell A1
+                            try:
+                                dv_scenario = DataValidation(type="list", formula1="'Scenario Converter'!$B$1:$H$1", allow_blank=True)
+                                scenario_reports_sheet.add_data_validation(dv_scenario)
+                                dv_scenario.add(scenario_reports_sheet['A1'])  # Placing drop-down in A1
+                                logger.info("Scenario Reports sheet created with drop-down in cell A1.")
+                            except Exception as e:
+                                st.error(f"Error adding drop-down to Scenario Reports sheet: {e}")
+                                logger.error(f"Error adding drop-down to Scenario Reports sheet: {e}")
+
+                            # ======= Create the Scenario Selector sheet =======
+                            # Continue with existing code for 'Scenario Selector' sheet
+                            scenario_selector_df = customizable_df.copy()
+                            # Remove 'Supplier Name' column from 'Scenario Selector' sheet
+                            if 'Supplier Name' in scenario_selector_df.columns:
+                                scenario_selector_df.drop(columns=['Supplier Name'], inplace=True)
+
+                            # Ensure the grouping column is present
+                            if not st.session_state.grouping_column_already_mapped:
+                                if grouping_column not in scenario_selector_df.columns:
+                                    # Add the grouping column next to 'Bid ID'
+                                    bid_id_idx = scenario_selector_df.columns.get_loc('Bid ID')
+                                    scenario_selector_df.insert(bid_id_idx + 1, grouping_column, '')
+
+                            scenario_selector_df.to_excel(writer, sheet_name='Scenario Selector', index=False)
+                            scenario_selector_sheet = workbook['Scenario Selector']
+
+                            # Map column names to letters in 'Scenario Selector' sheet
+                            scenario_selector_col_letter = {cell.value: get_column_letter(cell.column) for cell in scenario_selector_sheet[1]}
+                            max_row_selector = scenario_selector_sheet.max_row
+                            scenario_converter_sheet = workbook['Scenario Converter']
+                            max_row_converter = scenario_converter_sheet.max_row
+
+                            # Prepare formula components for 'Scenario Selector' sheet
+                            scenario_converter_data_range = f"'Scenario Converter'!$B$2:$H${max_row_converter}"
+                            scenario_converter_header_range = "'Scenario Converter'!$B$1:$H$1"
+                            scenario_bid_ids_range = f"'Scenario Converter'!$A$2:$A${max_row_converter}"
+
+                            bid_id_col_selector = scenario_selector_col_letter['Bid ID']
+                            awarded_supplier_col = scenario_selector_col_letter['Awarded Supplier']
+                            # Get the column letter for the grouping column in 'Scenario Selector' sheet
+                            selector_grouping_col = scenario_selector_col_letter.get(grouping_column)
+
+                            for row in range(2, max_row_selector + 1):
+                                bid_id_cell = f"{bid_id_col_selector}{row}"
+                                awarded_supplier_cell = f"{awarded_supplier_col}{row}"
+                                bid_volume_cell = f"{scenario_selector_col_letter['Bid Volume']}{row}"
+                                baseline_price_cell = f"{scenario_selector_col_letter['Baseline Price']}{row}"
+                                grouping_cell = f"{selector_grouping_col}{row}" if selector_grouping_col else None
+
+                                # Formula to pull 'Awarded Supplier' based on selected scenario
+                                formula_awarded_supplier = (
+                                    f"=IFERROR(INDEX({scenario_converter_data_range}, MATCH({bid_id_cell}, {scenario_bid_ids_range}, 0), "
+                                    f"MATCH('Scenario Reports'!$A$1, {scenario_converter_header_range}, 0)), \"\")"
+                                )
+                                scenario_selector_sheet[awarded_supplier_cell].value = formula_awarded_supplier
+
+                                # Use 'Awarded Supplier' directly in SUMIFS
+                                awarded_supplier_price_cell = f"{scenario_selector_col_letter['Awarded Supplier Price']}{row}"
+                                awarded_supplier_capacity_cell = f"{scenario_selector_col_letter['Awarded Supplier Capacity']}{row}"
+
+                                # Awarded Supplier Price
+                                formula_price = (
+                                    f"=IFERROR(SUMIFS('{ref_sheet_name}'!{ref_bid_price_col}:{ref_bid_price_col}, "
+                                    f"'{ref_sheet_name}'!{ref_bid_id_col}:{ref_bid_id_col}, {bid_id_cell}, "
+                                    f"'{ref_sheet_name}'!{ref_supplier_name_col}:{ref_supplier_name_col}, {awarded_supplier_cell}), \"\")"
+                                )
+                                scenario_selector_sheet[awarded_supplier_price_cell].value = formula_price
+
+                                # Awarded Supplier Capacity
+                                formula_supplier_capacity = (
+                                    f"=IFERROR(SUMIFS('{ref_sheet_name}'!{ref_supplier_capacity_col}:{ref_supplier_capacity_col}, "
+                                    f"'{ref_sheet_name}'!{ref_bid_id_col}:{ref_bid_id_col}, {bid_id_cell}, "
+                                    f"'{ref_sheet_name}'!{ref_supplier_name_col}:{ref_supplier_name_col}, {awarded_supplier_cell}), \"\")"
+                                )
+                                scenario_selector_sheet[awarded_supplier_capacity_cell].value = formula_supplier_capacity
+
+                                # Awarded Volume
+                                awarded_volume_cell = f"{scenario_selector_col_letter['Awarded Volume']}{row}"
+                                formula_awarded_volume = f"=IF({bid_volume_cell}=\"\", \"\", MIN({bid_volume_cell}, {awarded_supplier_capacity_cell}))"
+                                scenario_selector_sheet[awarded_volume_cell].value = formula_awarded_volume
+
+                                # Awarded Supplier Spend
+                                awarded_supplier_spend_cell = f"{scenario_selector_col_letter['Awarded Supplier Spend']}{row}"
+                                formula_spend = f"=IF({awarded_supplier_price_cell}<>\"\", {awarded_supplier_price_cell}*{awarded_volume_cell}, \"\")"
+                                scenario_selector_sheet[awarded_supplier_spend_cell].value = formula_spend
+
+                                # Savings
+                                savings_cell = f"{scenario_selector_col_letter['Savings']}{row}"
+                                formula_savings = f"=IF({awarded_supplier_price_cell}<>\"\", ({baseline_price_cell}-{awarded_supplier_price_cell})*{awarded_volume_cell}, \"\")"
+                                scenario_selector_sheet[savings_cell].value = formula_savings
+
+                                # Baseline Spend
+                                baseline_spend_cell = f"{scenario_selector_col_letter['Baseline Spend']}{row}"
+                                formula_baseline_spend = f"={baseline_price_cell}*{bid_volume_cell}"
+                                scenario_selector_sheet[baseline_spend_cell].value = formula_baseline_spend
+
+                                # If grouping column exists, populate it
+                                if grouping_cell and ref_grouping_col:
+                                    col_index = column_index_from_string(ref_grouping_col) - column_index_from_string(ref_bid_id_col) + 1
+                                    formula_grouping = (
+                                        f"=IFERROR(VLOOKUP({bid_id_cell}, '{ref_sheet_name}'!{ref_bid_id_col}:{ref_grouping_col}, "
+                                        f"{col_index}, FALSE), \"\")"
+                                    )
+                                    scenario_selector_sheet[grouping_cell].value = formula_grouping
+
+                            # Apply formatting to 'Scenario Selector' sheet
+                            currency_columns_selector = ['Baseline Spend', 'Baseline Price', 'Awarded Supplier Price', 'Awarded Supplier Spend', 'Savings']
+                            number_columns_selector = ['Bid Volume', 'Awarded Volume', 'Awarded Supplier Capacity']
+
+                            for col_name in currency_columns_selector:
+                                col_letter = scenario_selector_col_letter.get(col_name)
+                                if col_letter:
+                                    for row_num in range(2, max_row_selector + 1):
+                                        cell = scenario_selector_sheet[f"{col_letter}{row_num}"]
+                                        cell.number_format = '$#,##0.00'
+
+                            for col_name in number_columns_selector:
+                                col_letter = scenario_selector_col_letter.get(col_name)
+                                if col_letter:
+                                    for row_num in range(2, max_row_selector + 1):
+                                        cell = scenario_selector_sheet[f"{col_letter}{row_num}"]
+                                        cell.number_format = '#,##0'
+
+                            logger.info("Scenario Selector sheet created.")
+                            logger.info("Customizable Analysis completed.")
+
+
+
+
+
+                    # Convert the buffer to bytes
                     processed_data = output.getvalue()
 
-                st.download_button(
-                    label="Download Analysis Results",
-                    data=processed_data,
-                    file_name="scenario_analysis_results.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-                logger.info("Analysis results prepared for download.")
+                    # Provide a download button for the user
+                    st.download_button(
+                        label="Download Analysis Results",
+                        data=processed_data,
+                        file_name="scenario_analysis_results.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    logger.info("Analysis results prepared for download.")
+
+
+
 
     elif section == 'project_folder':
         if st.session_state.selected_project and st.session_state.selected_subfolder:
