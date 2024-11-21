@@ -2014,7 +2014,7 @@ def main():
 
                                                     # RFP Savings Formula
                                                     formula_rfp_savings = (
-                                                        f"=IFERROR(IF({supplier_name_cell}=\"\", \"\", AVERAGEIFS('Scenario Selector'!${adjusted_savings_col}:${adjusted_savings_col}, "
+                                                        f"=IFERROR(IF({supplier_name_cell}=\"\", \"\", SUMIFS('Scenario Selector'!${adjusted_savings_col}:${adjusted_savings_col}, "
                                                         f"'Scenario Selector'!${original_group_col}:${original_group_col}, {group_label_cell}, 'Scenario Selector'!${adjusted_supplier_name_col}:${adjusted_supplier_name_col}, {supplier_name_cell})),\"\")"
                                                     )
                                                     scenario_reports_sheet[rfp_savings_cell].value = formula_rfp_savings
