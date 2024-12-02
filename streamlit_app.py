@@ -14,6 +14,19 @@ from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.styles import Font
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter, column_index_from_string
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import MSO_ANCHOR
+from pptx.enum.dml import MSO_THEME_COLOR
+from pptx.dml.color import RGBColor
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+import tempfile
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
+from pptx.chart.data import ChartData, CategoryChartData
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -183,7 +196,7 @@ def add_missing_bid_ids(analysis_df, original_df, column_mapping, analysis_type)
 
 # Function for As-Is analysis
 def as_is_analysis(data, column_mapping):
-    """Perform 'As-Is' analysis with normalized fields."""
+    """Perform 'As-Is' analysis with normalized fields, including Current Price Savings."""
     logger.info("Starting As-Is analysis.")
     bid_price_col = column_mapping['Bid Price']
     bid_volume_col = column_mapping['Bid Volume']
@@ -193,6 +206,12 @@ def as_is_analysis(data, column_mapping):
     incumbent_col = column_mapping['Incumbent']
     supplier_name_col = column_mapping['Supplier Name']
     facility_col = column_mapping['Facility']
+
+    # Check if 'Current Price' is mapped and not 'None'
+    has_current_price = 'Current Price' in column_mapping and column_mapping['Current Price'] != 'None'
+    if has_current_price:
+        current_price_col = column_mapping['Current Price']
+        data['Current Price'] = data[current_price_col]
 
     data[supplier_name_col] = data[supplier_name_col].str.title()
     data[incumbent_col] = data[incumbent_col].str.title()
@@ -210,12 +229,13 @@ def as_is_analysis(data, column_mapping):
 
         if incumbent_bid.empty:
             bid_row = data[data[bid_id_col] == bid_id].iloc[0]
-            as_is_list.append({
+            row_dict = {
                 'Bid ID': bid_id,
                 'Bid ID Split': 'A',
                 'Facility': bid_row[facility_col],
                 'Incumbent': incumbent,
                 'Baseline Price': bid_row[baseline_price_col],
+                'Current Price': None if has_current_price else bid_row[baseline_price_col],  # Optional
                 'Bid Volume': bid_row[bid_volume_col],
                 'Baseline Spend': bid_row['Baseline Spend'],
                 'Awarded Supplier': 'No Bid from Incumbent',
@@ -223,8 +243,10 @@ def as_is_analysis(data, column_mapping):
                 'Awarded Volume': None,
                 'Awarded Supplier Spend': None,
                 'Awarded Supplier Capacity': None,
-                'Savings': None
-            })
+                'Baseline Savings': None,
+                'Current Price Savings': None if has_current_price else None
+            }
+            as_is_list.append(row_dict)
             logger.debug(f"No valid bid from incumbent for Bid ID {bid_id}.")
             continue
 
@@ -236,12 +258,14 @@ def as_is_analysis(data, column_mapping):
             baseline_volume = awarded_volume
             baseline_spend = baseline_volume * row[baseline_price_col]
             as_is_spend = awarded_volume * row[bid_price_col]
-            as_is_savings = baseline_spend - as_is_spend
-            as_is_list.append({
+            baseleline_as_is_savings = baseline_spend - as_is_spend
+
+
+            row_dict = {
                 'Bid ID': row[bid_id_col],
                 'Bid ID Split': split_index,
                 'Facility': row[facility_col],
-                'Incumbent': row[incumbent_col],
+                'Incumbent': incumbent,
                 'Baseline Price': row[baseline_price_col],
                 'Bid Volume': baseline_volume,
                 'Baseline Spend': baseline_spend,
@@ -250,20 +274,55 @@ def as_is_analysis(data, column_mapping):
                 'Awarded Volume': awarded_volume,
                 'Awarded Supplier Spend': as_is_spend,
                 'Awarded Supplier Capacity': supplier_capacity,
-                'Savings': as_is_savings
-            })
+                'Baseline Savings': baseleline_as_is_savings
+            }
+
+            if has_current_price:
+                current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
+                row_dict['Current Price'] = current_price
+                if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
+                    row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
+                else:
+                    row_dict['Current Price Savings'] = None
+
+            as_is_list.append(row_dict)
             logger.debug(f"As-Is analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume}")
             remaining_volume -= awarded_volume
             if remaining_volume > 0:
                 split_index = chr(ord(split_index) + 1)
             else:
                 break
+
     as_is_df = pd.DataFrame(as_is_list)
+
+    # Define desired column order
+    desired_columns = [
+        'Bid ID', 'Bid ID Split', 'Facility', 'Incumbent',
+        'Baseline Price'
+    ]
+
+    if has_current_price:
+        desired_columns.append('Current Price')
+
+    desired_columns.extend([
+        'Bid Volume', 'Baseline Spend',
+        'Awarded Supplier', 'Awarded Supplier Price',
+        'Awarded Volume', 'Awarded Supplier Spend',
+        'Awarded Supplier Capacity', 'Baseline Savings'
+    ])
+
+    if has_current_price:
+        desired_columns.append('Current Price Savings')
+
+    # Reorder columns
+    as_is_df = as_is_df.reindex(columns=desired_columns)
+
     return as_is_df
+
 
 # Function for Best of Best analysis
 def best_of_best_analysis(data, column_mapping):
-    """Perform 'Best of Best' analysis with normalized fields."""
+    """Perform 'Best of Best' analysis with normalized fields, including Current Price Savings."""
     logger.info("Starting Best of Best analysis.")
     bid_price_col = column_mapping['Bid Price']
     bid_volume_col = column_mapping['Bid Volume']
@@ -273,6 +332,12 @@ def best_of_best_analysis(data, column_mapping):
     facility_col = column_mapping['Facility']
     incumbent_col = column_mapping['Incumbent']
     supplier_name_col = column_mapping['Supplier Name']
+
+    # Check if 'Current Price' is mapped and not 'None'
+    has_current_price = 'Current Price' in column_mapping and column_mapping['Current Price'] != 'None'
+    if has_current_price:
+        current_price_col = column_mapping['Current Price']
+        data['Current Price'] = data[current_price_col]
 
     # Treat bids with Bid Price NaN or 0 as 'No Bid'
     data['Valid Bid'] = data[bid_price_col].notna() & (data[bid_price_col] != 0)
@@ -286,12 +351,13 @@ def best_of_best_analysis(data, column_mapping):
         bid_rows = bid_data[bid_data[bid_id_col] == bid_id]
         if bid_rows.empty:
             bid_row = data[data[bid_id_col] == bid_id].iloc[0]
-            best_of_best_list.append({
+            row_dict = {
                 'Bid ID': bid_id,
                 'Bid ID Split': 'A',
                 'Facility': bid_row[facility_col],
                 'Incumbent': bid_row[incumbent_col],
                 'Baseline Price': bid_row[baseline_price_col],
+                'Current Price': None if not has_current_price else bid_row[current_price_col],
                 'Bid Volume': bid_row[bid_volume_col],
                 'Baseline Spend': bid_row['Baseline Spend'],
                 'Awarded Supplier': 'No Bids',
@@ -299,10 +365,13 @@ def best_of_best_analysis(data, column_mapping):
                 'Awarded Volume': None,
                 'Awarded Supplier Spend': None,
                 'Awarded Supplier Capacity': None,
-                'Savings': None
-            })
+                'Baseline Savings': None,
+                'Current Price Savings': None if not has_current_price else None
+            }
+            best_of_best_list.append(row_dict)
             logger.debug(f"No valid bids for Bid ID {bid_id}.")
             continue
+
         remaining_volume = bid_rows.iloc[0][bid_volume_col]
         split_index = 'A'
         for i, row in bid_rows.iterrows():
@@ -311,8 +380,9 @@ def best_of_best_analysis(data, column_mapping):
             baseline_volume = awarded_volume
             baseline_spend = baseline_volume * row[baseline_price_col]
             best_of_best_spend = awarded_volume * row[bid_price_col]
-            best_of_best_savings = baseline_spend - best_of_best_spend
-            best_of_best_list.append({
+            baseline_savings = baseline_spend - best_of_best_spend
+
+            row_dict = {
                 'Bid ID': row[bid_id_col],
                 'Bid ID Split': split_index,
                 'Facility': row[facility_col],
@@ -325,22 +395,58 @@ def best_of_best_analysis(data, column_mapping):
                 'Awarded Volume': awarded_volume,
                 'Awarded Supplier Spend': best_of_best_spend,
                 'Awarded Supplier Capacity': supplier_capacity,
-                'Savings': best_of_best_savings
-            })
+                'Baseline Savings': baseline_savings
+            }
+
+            if has_current_price:
+                current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
+                row_dict['Current Price'] = current_price
+                if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
+                    row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
+                else:
+                    row_dict['Current Price Savings'] = None
+
+            best_of_best_list.append(row_dict)
             logger.debug(f"Best of Best analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume}")
             remaining_volume -= awarded_volume
             if remaining_volume > 0:
                 split_index = chr(ord(split_index) + 1)
             else:
                 break
+
     best_of_best_df = pd.DataFrame(best_of_best_list)
+
+    # Define desired column order
+    desired_columns = [
+        'Bid ID', 'Bid ID Split', 'Facility', 'Incumbent',
+        'Baseline Price'
+    ]
+
+    if has_current_price:
+        desired_columns.append('Current Price')
+
+    desired_columns.extend([
+        'Bid Volume', 'Baseline Spend',
+        'Awarded Supplier', 'Awarded Supplier Price',
+        'Awarded Volume', 'Awarded Supplier Spend',
+        'Awarded Supplier Capacity', 'Baseline Savings'
+    ])
+
+    if has_current_price:
+        desired_columns.append('Current Price Savings')
+
+    # Reorder columns
+    best_of_best_df = best_of_best_df.reindex(columns=desired_columns)
+
     return best_of_best_df
+
 
 # Function for Best of Best Excluding Suppliers analysis
 def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
-    """Perform 'Best of Best Excluding Suppliers' analysis."""
+    """Perform 'Best of Best Excluding Suppliers' analysis, including Current Price and Savings."""
     logger.info("Starting Best of Best Excluding Suppliers analysis.")
-    # Column mappings
+    
+    # Extract column names from column_mapping
     bid_price_col = column_mapping['Bid Price']
     bid_volume_col = column_mapping['Bid Volume']
     baseline_price_col = column_mapping['Baseline Price']
@@ -349,13 +455,23 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
     incumbent_col = column_mapping['Incumbent']
     supplier_name_col = column_mapping['Supplier Name']
     facility_col = column_mapping['Facility']
-
+    
+    # Check if 'Current Price' is mapped and not 'None'
+    has_current_price = 'Current Price' in column_mapping and column_mapping['Current Price'] != 'None'
+    if has_current_price:
+        current_price_col = column_mapping['Current Price']
+        data['Current Price'] = data[current_price_col]
+    
+    # Standardize supplier and incumbent names
     data[supplier_name_col] = data[supplier_name_col].str.title()
     data[incumbent_col] = data[incumbent_col].str.title()
-
+    
+    # Calculate Baseline Spend
+    data['Baseline Spend'] = data[bid_volume_col] * data[baseline_price_col]
+    
     # Treat bids with Bid Price NaN or 0 as 'No Bid'
     data['Valid Bid'] = data[bid_price_col].notna() & (data[bid_price_col] != 0)
-
+    
     # Apply exclusion rules
     for condition in excluded_conditions:
         supplier, field, logic, value, exclude_all = condition
@@ -369,70 +485,110 @@ def best_of_best_excluding_suppliers(data, column_mapping, excluded_conditions):
             elif logic == "Not equal to":
                 data = data[~((data[supplier_name_col] == supplier) & (data[field] != value))]
                 logger.debug(f"Excluding bids from supplier {supplier} where {field} != {value}.")
-
+    
+    # Filter valid bids after exclusions
     bid_data = data.loc[data['Valid Bid']]
     bid_data = bid_data.sort_values([bid_id_col, bid_price_col])
-    data['Baseline Spend'] = data[bid_volume_col] * data[baseline_price_col]
     best_of_best_excl_list = []
     bid_ids = data[bid_id_col].unique()
+    
     for bid_id in bid_ids:
         bid_rows = bid_data[bid_data[bid_id_col] == bid_id]
         if bid_rows.empty:
             bid_row = data[data[bid_id_col] == bid_id].iloc[0]
-            baseline_spend = bid_row[bid_volume_col] * bid_row[baseline_price_col]
-            best_of_best_excl_list.append({
+            row_dict = {
                 'Bid ID': bid_id,
                 'Bid ID Split': 'A',
                 'Facility': bid_row[facility_col],
                 'Incumbent': bid_row[incumbent_col],
                 'Baseline Price': bid_row[baseline_price_col],
+                'Current Price': None if not has_current_price else bid_row[current_price_col],
                 'Bid Volume': bid_row[bid_volume_col],
-                'Baseline Spend': baseline_spend,
+                'Baseline Spend': bid_row['Baseline Spend'],
                 'Awarded Supplier': 'Unallocated',
                 'Awarded Supplier Price': None,
-                'Awarded Volume': bid_row[bid_volume_col],
+                'Awarded Volume': None,
                 'Awarded Supplier Spend': None,
                 'Awarded Supplier Capacity': None,
-                'Savings': None
-            })
-            logger.debug(f"All suppliers excluded or no valid bids for Bid ID {bid_id}. Marked as Unallocated.")
+                'Baseline Savings': None,
+                'Current Price Savings': None if not has_current_price else None
+            }
+            best_of_best_excl_list.append(row_dict)
+            logger.debug(f"No valid bids for Bid ID {bid_id}. Marked as Unallocated.")
             continue
+        
         remaining_volume = bid_rows.iloc[0][bid_volume_col]
         split_index = 'A'
+        
         for i, row in bid_rows.iterrows():
             supplier_capacity = row[supplier_capacity_col] if pd.notna(row[supplier_capacity_col]) else remaining_volume
             awarded_volume = min(remaining_volume, supplier_capacity)
             baseline_volume = awarded_volume
             baseline_spend = baseline_volume * row[baseline_price_col]
-            awarded_spend = awarded_volume * row[bid_price_col]
-            savings = baseline_spend - awarded_spend
-            best_of_best_excl_list.append({
+            best_of_best_spend = awarded_volume * row[bid_price_col]
+            baseline_savings = baseline_spend - best_of_best_spend
+            
+            row_dict = {
                 'Bid ID': row[bid_id_col],
                 'Bid ID Split': split_index,
                 'Facility': row[facility_col],
                 'Incumbent': row[incumbent_col],
                 'Baseline Price': row[baseline_price_col],
+                'Current Price': row[current_price_col] if has_current_price else None,
                 'Bid Volume': baseline_volume,
                 'Baseline Spend': baseline_spend,
                 'Awarded Supplier': row[supplier_name_col],
                 'Awarded Supplier Price': row[bid_price_col],
                 'Awarded Volume': awarded_volume,
-                'Awarded Supplier Spend': awarded_spend,
+                'Awarded Supplier Spend': best_of_best_spend,
                 'Awarded Supplier Capacity': supplier_capacity,
-                'Savings': savings
-            })
+                'Baseline Savings': baseline_savings
+            }
+    
+            if has_current_price:
+                current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
+                row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume'] if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None else None
+    
+            best_of_best_excl_list.append(row_dict)
             logger.debug(f"Best of Best Excl analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume}")
             remaining_volume -= awarded_volume
-            if remaining_volume <= 0:
+            if remaining_volume > 0:
+                split_index = chr(ord(split_index) + 1)
+            else:
                 break
-            split_index = chr(ord(split_index) + 1)
+    
     best_of_best_excl_df = pd.DataFrame(best_of_best_excl_list)
+    
+    # Define desired column order
+    desired_columns = [
+        'Bid ID', 'Bid ID Split', 'Facility', 'Incumbent',
+        'Baseline Price'
+    ]
+    
+    if has_current_price:
+        desired_columns.append('Current Price')
+    
+    desired_columns.extend([
+        'Bid Volume', 'Baseline Spend',
+        'Awarded Supplier', 'Awarded Supplier Price',
+        'Awarded Volume', 'Awarded Supplier Spend',
+        'Awarded Supplier Capacity', 'Baseline Savings'
+    ])
+    
+    if has_current_price:
+        desired_columns.append('Current Price Savings')
+    
+    # Reorder columns
+    best_of_best_excl_df = best_of_best_excl_df.reindex(columns=desired_columns)
+    
     return best_of_best_excl_df
+
 
 # Function for As-Is Excluding Suppliers analysis
 def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions):
-    """Perform 'As-Is Excluding Suppliers' analysis with exclusion rules."""
+    """Perform 'As-Is Excluding Suppliers' analysis with exclusion rules, including Current Price Savings."""
     logger.info("Starting As-Is Excluding Suppliers analysis.")
+    
     # Column mappings
     bid_price_col = column_mapping['Bid Price']
     bid_volume_col = column_mapping['Bid Volume']
@@ -442,13 +598,20 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     supplier_name_col = column_mapping['Supplier Name']
     facility_col = column_mapping['Facility']
     baseline_price_col = column_mapping['Baseline Price']
-
+    
+    # Check if 'Current Price' is mapped and not 'None'
+    has_current_price = 'Current Price' in column_mapping and column_mapping['Current Price'] != 'None'
+    if has_current_price:
+        current_price_col = column_mapping['Current Price']
+        data['Current Price'] = data[current_price_col]
+    
+    # Standardize supplier and incumbent names
     data[supplier_name_col] = data[supplier_name_col].str.title()
     data[incumbent_col] = data[incumbent_col].str.title()
-
+    
     # Treat bids with Bid Price NaN or 0 as 'No Bid'
     data['Valid Bid'] = data[bid_price_col].notna() & (data[bid_price_col] != 0)
-
+    
     # Apply exclusion rules specific to this analysis
     for condition in excluded_conditions:
         supplier, field, logic, value, exclude_all = condition
@@ -462,12 +625,12 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
             elif logic == "Not equal to":
                 data = data[~((data[supplier_name_col] == supplier) & (data[field] != value))]
                 logger.debug(f"Excluding bids from supplier {supplier} where {field} != {value}.")
-
+    
     bid_data = data.loc[data['Valid Bid']]
     data['Baseline Spend'] = data[bid_volume_col] * data[baseline_price_col]
     as_is_excl_list = []
     bid_ids = data[bid_id_col].unique()
-
+    
     for bid_id in bid_ids:
         bid_rows = bid_data[bid_data[bid_id_col] == bid_id]
         all_rows = data[data[bid_id_col] == bid_id]
@@ -481,9 +644,16 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
         incumbent_excluded = False
         for condition in excluded_conditions:
             supplier, field, logic, value, exclude_all = condition
-            if supplier == incumbent and (exclude_all or (logic == "Equal to" and all_rows[field].iloc[0] == value) or (logic == "Not equal to" and all_rows[field].iloc[0] != value)):
-                incumbent_excluded = True
-                break
+            if supplier == incumbent:
+                if exclude_all:
+                    incumbent_excluded = True
+                    break
+                elif logic == "Equal to" and all_rows[field].iloc[0] == value:
+                    incumbent_excluded = True
+                    break
+                elif logic == "Not equal to" and all_rows[field].iloc[0] != value:
+                    incumbent_excluded = True
+                    break
 
         if not incumbent_excluded:
             # Incumbent is not excluded
@@ -494,9 +664,9 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 supplier_capacity = row[supplier_capacity_col] if pd.notna(row[supplier_capacity_col]) else bid_volume
                 awarded_volume = min(bid_volume, supplier_capacity)
                 awarded_spend = awarded_volume * row[bid_price_col]
-                savings = baseline_spend - awarded_spend
+                baseline_savings = baseline_spend - awarded_spend
 
-                as_is_excl_list.append({
+                row_dict = {
                     'Bid ID': bid_id,
                     'Bid ID Split': 'A',
                     'Facility': facility,
@@ -509,14 +679,24 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Awarded Volume': awarded_volume,
                     'Awarded Supplier Spend': awarded_spend,
                     'Awarded Supplier Capacity': supplier_capacity,
-                    'Savings': savings
-                })
+                    'Baseline Savings': baseline_savings  # Renamed from 'Savings'
+                }
+
+                if has_current_price:
+                    current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
+                    row_dict['Current Price'] = current_price
+                    if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
+                        row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
+                    else:
+                        row_dict['Current Price Savings'] = None
+
+                as_is_excl_list.append(row_dict)
                 logger.debug(f"As-Is Excl analysis for Bid ID {bid_id}: Awarded to incumbent.")
 
                 remaining_volume = bid_volume - awarded_volume
                 if remaining_volume > 0:
                     # Remaining volume is unallocated
-                    as_is_excl_list.append({
+                    row_dict_unallocated = {
                         'Bid ID': bid_id,
                         'Bid ID Split': 'B',
                         'Facility': facility,
@@ -529,12 +709,18 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                         'Awarded Volume': remaining_volume,
                         'Awarded Supplier Spend': None,
                         'Awarded Supplier Capacity': None,
-                        'Savings': None
-                    })
+                        'Baseline Savings': None  # Renamed from 'Savings'
+                    }
+
+                    if has_current_price:
+                        row_dict_unallocated['Current Price'] = None
+                        row_dict_unallocated['Current Price Savings'] = None
+
+                    as_is_excl_list.append(row_dict_unallocated)
                     logger.debug(f"Remaining volume for Bid ID {bid_id} is unallocated after awarding to incumbent.")
             else:
                 # Incumbent did not bid or bid is invalid
-                as_is_excl_list.append({
+                row_dict = {
                     'Bid ID': bid_id,
                     'Bid ID Split': 'A',
                     'Facility': facility,
@@ -547,8 +733,14 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Awarded Volume': bid_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
-                    'Savings': None
-                })
+                    'Baseline Savings': None,  # Renamed from 'Savings'
+                }
+
+                if has_current_price:
+                    row_dict['Current Price'] = None
+                    row_dict['Current Price Savings'] = None
+
+                as_is_excl_list.append(row_dict)
                 logger.debug(f"Incumbent did not bid or invalid bid for Bid ID {bid_id}. Entire volume is unallocated.")
         else:
             # Incumbent is excluded
@@ -560,7 +752,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
 
             if valid_bids.empty:
                 # No valid bids, mark as Unallocated
-                as_is_excl_list.append({
+                row_dict = {
                     'Bid ID': bid_id,
                     'Bid ID Split': split_index,
                     'Facility': facility,
@@ -573,8 +765,14 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Awarded Volume': bid_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
-                    'Savings': None
-                })
+                    'Baseline Savings': None  # Renamed from 'Savings'
+                }
+
+                if has_current_price:
+                    row_dict['Current Price'] = current_price
+                    row_dict['Current Price Savings'] = None
+
+                as_is_excl_list.append(row_dict)
                 logger.debug(f"No valid bids for Bid ID {bid_id} after exclusions. Entire volume is unallocated.")
                 continue
 
@@ -583,10 +781,10 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 awarded_volume = min(remaining_volume, supplier_capacity)
                 awarded_spend = awarded_volume * row[bid_price_col]
                 baseline_spend_allocated = awarded_volume * baseline_price
-                savings = baseline_spend_allocated - awarded_spend
+                baseline_savings = baseline_spend_allocated - awarded_spend
 
-                as_is_excl_list.append({
-                    'Bid ID': bid_id,
+                row_dict = {
+                    'Bid ID': row[bid_id_col],
                     'Bid ID Split': split_index,
                     'Facility': facility,
                     'Incumbent': incumbent,
@@ -598,8 +796,18 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Awarded Volume': awarded_volume,
                     'Awarded Supplier Spend': awarded_spend,
                     'Awarded Supplier Capacity': supplier_capacity,
-                    'Savings': savings
-                })
+                    'Baseline Savings': baseline_savings  # Renamed from 'Savings'
+                }
+
+                if has_current_price:
+                    current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
+                    row_dict['Current Price'] = current_price
+                    if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
+                        row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
+                    else:
+                        row_dict['Current Price Savings'] = None
+
+                as_is_excl_list.append(row_dict)
                 logger.debug(f"As-Is Excl analysis for Bid ID {bid_id}, Split {split_index}: Awarded Volume = {awarded_volume} to {row[supplier_name_col]}")
 
                 remaining_volume -= awarded_volume
@@ -609,7 +817,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
 
             if remaining_volume > 0:
                 # Remaining volume is unallocated
-                as_is_excl_list.append({
+                row_dict_unallocated = {
                     'Bid ID': bid_id,
                     'Bid ID Split': split_index,
                     'Facility': facility,
@@ -622,14 +830,44 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                     'Awarded Volume': remaining_volume,
                     'Awarded Supplier Spend': None,
                     'Awarded Supplier Capacity': None,
-                    'Savings': None
-                })
+                    'Baseline Savings': None  # Renamed from 'Savings'
+                }
+
+                if has_current_price:
+                    row_dict_unallocated['Current Price'] = current_price
+                    row_dict_unallocated['Current Price Savings'] = None
+
+                as_is_excl_list.append(row_dict_unallocated)
                 logger.debug(f"Remaining volume for Bid ID {bid_id} is unallocated after allocating to suppliers.")
 
     as_is_excl_df = pd.DataFrame(as_is_excl_list)
+
+    # Define desired column order
+    desired_columns = [
+        'Bid ID', 'Bid ID Split', 'Facility', 'Incumbent',
+        'Baseline Price'
+    ]
+
+    if has_current_price:
+        desired_columns.append('Current Price')
+
+    desired_columns.extend([
+        'Bid Volume', 'Baseline Spend',
+        'Awarded Supplier', 'Awarded Supplier Price',
+        'Awarded Volume', 'Awarded Supplier Spend',
+        'Awarded Supplier Capacity', 'Baseline Savings'
+    ])
+
+    if has_current_price:
+        desired_columns.append('Current Price Savings')
+
+    # Reorder columns
+    as_is_excl_df = as_is_excl_df.reindex(columns=desired_columns)
+
     return as_is_excl_df
 
-# Bid Coverage Report Functions (Updated to use 'Awarded Supplier' directly)
+
+# Bid Coverage Report Functions
 
 # Function for Competitiveness Report
 def competitiveness_report(data, column_mapping, group_by_field):
@@ -834,6 +1072,881 @@ def customizable_analysis(data, column_mapping):
     return customizable_df
 
 
+# ////// Presentations ////// #
+
+# //// Scenario Summary Presentation /////#
+
+def print_slide_layouts(template_file_path):
+    from pptx import Presentation
+    prs = Presentation(template_file_path)
+    for index, layout in enumerate(prs.slide_layouts):
+        print(f"Index {index}: Layout Name - '{layout.name}'")
+
+def format_currency(amount):
+    """Formats the currency value with commas."""
+    return "${:,.0f}".format(amount)
+
+def format_currency_in_millions(amount):
+    """Formats the amount in millions with one decimal place and appends 'MM'."""
+    amount_in_millions = amount / 1_000_000
+    if amount < 0:
+        return f"(${abs(amount_in_millions):,.1f}MM)"
+    else:
+        return f"${amount_in_millions:,.1f}MM"
+
+def add_header(slide, slide_num):
+    """Adds the main header to the slide."""
+    left = Inches(0)
+    top = Inches(0.01)
+    width = Inches(12.12)
+    height = Inches(0.42)
+    header = slide.shapes.add_textbox(left, top, width, height)
+    header_tf = header.text_frame
+    header_tf.vertical_anchor = MSO_ANCHOR.TOP
+    header_tf.word_wrap = True
+    p = header_tf.paragraphs[0]
+    if slide_num == 1:
+        p.text = "Scenario Summary"
+    else:
+        p.text = f"Scenario Summary #{slide_num}"
+    p.font.size = Pt(25)
+    p.font.name = "Calibri"
+    p.font.color.rgb = RGBColor(0, 51, 153)  # Dark Blue
+    p.font.bold = True
+    header.fill.background()  # No Fill
+    header.line.fill.background()  # No Line
+
+def add_row_labels(slide):
+    """Adds row labels to the slide (once per slide)."""
+    row_labels = [
+        'Scenario Name',
+        'Description',
+        '# of Suppliers (% spend)',
+        'RFP Savings %',
+        'Total Value Opportunity ($MM)',
+        'Key Considerations'
+    ]
+    top_positions = [
+        Inches(0.8),
+        Inches(1.29),
+        Inches(1.9),
+        Inches(3.25),
+        Inches(3.84),
+        Inches(4.89) 
+    ]
+    left = Inches(0.58)
+    width = Inches(1.5)
+    height = Inches(0.2)
+    for label_text, top in zip(row_labels, top_positions):
+        label_box = slide.shapes.add_textbox(left, top, width, height)
+        label_tf = label_box.text_frame
+        label_tf.vertical_anchor = MSO_ANCHOR.TOP
+        label_tf.word_wrap = True
+        p = label_tf.paragraphs[0]
+        p.text = label_text
+        p.font.bold = True
+        p.font.size = Pt(12)
+        p.font.bold = True
+        p.font.name = "Calibri"
+        p.font.color.rgb = RGBColor(0, 51, 153)  # Dark Blue
+        label_box.fill.background()
+        label_box.line.fill.background()
+
+def add_scenario_content(slide, df, scenario, scenario_position):
+    """Adds the content for a single scenario to the slide. scenario_position: 1, 2, or 3"""
+    df.columns = df.columns.str.strip()
+
+    expected_columns = [
+        'Awarded Supplier Name',
+        'Awarded Supplier Spend',
+        'AST Savings',
+        'Current Savings',
+        'AST Baseline Spend',
+        'Current Baseline Spend'
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found in sheet '{scenario}'.")
+
+    base_left = Inches(2.72) + (scenario_position - 1) * Inches(3.15)
+    positions = {
+        'scenario_name': {'left': base_left, 'top': Inches(0.8), 'width': Inches(2.5), 'height': Inches(0.34)},
+        'description': {'left': base_left, 'top': Inches(1.29), 'width': Inches(2.5), 'height': Inches(0.34)},
+        'suppliers_entry': {'left': base_left, 'top': Inches(1.85), 'width': Inches(2.5), 'height': Inches(1.11)},
+        'rfp_entry': {'left': base_left, 'top': Inches(3.26), 'width': Inches(2.5), 'height': Inches(0.3)},
+        'key_considerations': {'left': base_left, 'top': Inches(4.88), 'width': Inches(2.5), 'height': Inches(2.0)},
+    }
+
+    # Add Scenario Name
+    scenario_name_box = slide.shapes.add_textbox(
+        positions['scenario_name']['left'],
+        positions['scenario_name']['top'],
+        positions['scenario_name']['width'],
+        positions['scenario_name']['height']
+    )
+    scenario_name_tf = scenario_name_box.text_frame
+    scenario_name_tf.vertical_anchor = MSO_ANCHOR.TOP
+    scenario_name_tf.word_wrap = True
+    p = scenario_name_tf.paragraphs[0]
+    p.text = scenario
+    p.font.size = Pt(14)
+    p.font.name = "Calibri"
+    p.alignment = PP_ALIGN.CENTER
+    p.font.bold = True
+    p.font.color.rgb = RGBColor(0, 51, 153)  # Dark Blue
+    scenario_name_box.fill.background()
+    scenario_name_box.line.fill.background()
+
+    # Add Description Entry
+    desc_entry = slide.shapes.add_textbox(
+        positions['description']['left'],
+        positions['description']['top'],
+        positions['description']['width'],
+        positions['description']['height']
+    )
+    desc_entry_tf = desc_entry.text_frame
+    desc_entry_tf.vertical_anchor = MSO_ANCHOR.TOP
+    desc_entry_tf.word_wrap = True
+    p = desc_entry_tf.paragraphs[0]
+    p.text = "Describe your scenario here"
+    p.font.size = Pt(12)
+    p.font.name = "Calibri"
+    p.alignment = PP_ALIGN.CENTER
+    p.font.color.rgb = RGBColor(0, 0, 0)  # Black
+    desc_entry.fill.background()  # No Fill
+    desc_entry.line.fill.background()  # No Line
+
+    # Add Suppliers Entry
+    suppliers_entry = slide.shapes.add_textbox(
+        positions['suppliers_entry']['left'],
+        positions['suppliers_entry']['top'],
+        positions['suppliers_entry']['width'],
+        positions['suppliers_entry']['height']
+    )
+    suppliers_entry_tf = suppliers_entry.text_frame
+    suppliers_entry_tf.vertical_anchor = MSO_ANCHOR.TOP
+    suppliers_entry_tf.word_wrap = True
+    p = suppliers_entry_tf.paragraphs[0]
+    # Calculate number of suppliers and % spend
+    total_spend = df['Awarded Supplier Spend'].sum()
+    suppliers = df.groupby('Awarded Supplier Name')['Awarded Supplier Spend'].sum().reset_index()
+    suppliers['Spend %'] = suppliers['Awarded Supplier Spend'] / total_spend * 100
+    # Sort suppliers by 'Spend %' in descending order
+    suppliers = suppliers.sort_values(by='Spend %', ascending=False)
+    num_suppliers = suppliers['Awarded Supplier Name'].nunique()
+    supplier_list = [f"{row['Awarded Supplier Name']} ({row['Spend %']:.0f}%)" for idx, row in suppliers.iterrows()]
+    # Print # of suppliers in scenario suppliers joined with % of spend
+    supplier_text = f"{num_suppliers}- " + ", ".join(supplier_list)
+    p.text = supplier_text
+    p.font.size = Pt(12)
+    p.alignment = PP_ALIGN.CENTER
+    p.font.name = "Calibri"
+    p.font.color.rgb = RGBColor(0, 0, 0)  # Black
+    suppliers_entry.fill.background()  # No Fill
+    suppliers_entry.line.fill.background()  # No Line
+
+    # Calculate AST Savings % and Current Savings %
+    total_ast_savings = df['AST Savings'].sum()
+    total_current_savings = df['Current Savings'].sum()
+    ast_baseline_spend = df['AST Baseline Spend'].sum()
+    current_baseline_spend = df['Current Baseline Spend'].sum()
+
+    ast_savings_pct = (total_ast_savings / ast_baseline_spend * 100) if ast_baseline_spend != 0 else 0
+    current_savings_pct = (total_current_savings / current_baseline_spend * 100) if current_baseline_spend != 0 else 0
+
+    rfp_savings_str = f"{ast_savings_pct:.0f}% | {current_savings_pct:.0f}%"
+
+    # Add RFP Savings % Entry
+    rfp_entry = slide.shapes.add_textbox(
+        positions['rfp_entry']['left'],
+        positions['rfp_entry']['top'],
+        positions['rfp_entry']['width'],
+        positions['rfp_entry']['height']
+    )
+    rfp_entry_tf = rfp_entry.text_frame
+    rfp_entry_tf.vertical_anchor = MSO_ANCHOR.TOP
+    rfp_entry_tf.word_wrap = True
+    p = rfp_entry_tf.paragraphs[0]
+    p.text = rfp_savings_str
+    p.alignment = PP_ALIGN.CENTER
+    p.font.size = Pt(12)
+    p.font.name = "Calibri"
+    p.font.color.rgb = RGBColor(0, 0, 0)  # Black
+    rfp_entry.fill.background()  # No Fill
+    rfp_entry.line.fill.background()  # No Line
+
+    # Add Key Considerations Entry
+    key_entry = slide.shapes.add_textbox(
+        positions['key_considerations']['left'],
+        positions['key_considerations']['top'],
+        positions['key_considerations']['width'],
+        positions['key_considerations']['height']
+    )
+    key_entry_tf = key_entry.text_frame
+    key_entry_tf.vertical_anchor = MSO_ANCHOR.TOP
+    key_entry_tf.word_wrap = True
+    p = key_entry_tf.paragraphs[0]
+    p.text = f"Key considerations for {scenario}"
+    p.font.size = Pt(12)
+    p.font.name = "Calibri"
+    p.alignment = PP_ALIGN.LEFT
+    p.font.color.rgb = RGBColor(0, 0, 0)  # Black
+    key_entry.fill.background()  # No Fill
+    key_entry.line.fill.background()  # No Line
+
+def add_chart(slide, scenario_names, ast_savings_list, current_savings_list):
+    """Adds a bar chart to the slide between RFP Savings % and Key Considerations."""
+    chart_data = CategoryChartData()
+    chart_data.categories = scenario_names
+
+    # Use raw values for chart data
+    chart_data.add_series('AST', ast_savings_list)
+    chart_data.add_series('Current', current_savings_list)
+
+    # Define the chart size and position
+    x, y, cx, cy = Inches(1.86), Inches(3.69), Inches(9.0), Inches(1.0)  # Adjusted position and size
+
+    chart = slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, x, y, cx, cy, chart_data
+    ).chart
+
+    # Format the chart
+    # Set the colors for the series
+    # AST Savings in Dark Blue Accent 1
+    # Current Savings in Turquoise Accent 2
+
+    # For AST Savings (Series 1)
+    series1 = chart.series[0]
+    fill1 = series1.format.fill
+    fill1.solid()
+    fill1.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1  # Dark Blue Accent 1
+
+    # For Current Savings (Series 2)
+    series2 = chart.series[1]
+    fill2 = series2.format.fill
+    fill2.solid()
+    fill2.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_2  # Turquoise Accent 2
+
+    # Set the legend position
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.RIGHT
+    chart.legend.include_in_layout = False  # "Show the legend without overlapping the chart"
+    chart.legend.font.size = Pt(12)
+    chart.legend.font.name = "Calibri"
+
+    # Remove chart title
+    chart.has_title = False
+
+    # Hide the horizontal (category) axis
+    category_axis = chart.category_axis
+    category_axis.visible = False  # Hide the horizontal axis completely
+
+    # Configure the vertical (value) axis
+    value_axis = chart.value_axis
+    value_axis.visible = False
+    value_axis.has_major_gridlines = True
+    value_axis.major_gridlines.format.line.color.rgb = RGBColor(192, 192, 192)  # Light Gray
+    value_axis.tick_labels.visible = False  # Hide labels
+
+    # Adjust series overlap and gap width
+    plot = chart.plots[0]
+    plot.gap_width = 217  # Adjust gap width to 217%
+    plot.overlap = -27   # Adjust series overlap to -27%
+
+    # Add data labels with formatted currency
+    data_lists = [ast_savings_list, current_savings_list]
+    for idx, series in enumerate(chart.series):
+        values = data_lists[idx]
+        for point_idx, point in enumerate(series.points):
+            data_label = point.data_label
+            data_label.has_value = False  # We will set the text manually
+            data_label.number_format_is_linked = False
+            data_label.visible = True
+
+            # Set font properties
+            text_frame = data_label.text_frame
+            text_frame.text = ''  # Clear existing text
+            p = text_frame.paragraphs[0]
+            run = p.add_run()
+            value = values[point_idx]
+            run.text = format_currency_in_millions(value)
+            run.font.size = Pt(12)
+            run.font.name = "Calibri"
+            run.font.bold = False
+            run.font.color.rgb = RGBColor(0, 0, 0)  # Black
+
+def process_scenario_dataframe(df, scenario_detail_grouping):
+    """
+    Processes the scenario DataFrame to ensure required columns are present,
+    and includes the grouping column.
+    """
+    # Ensure columns are stripped
+    df.columns = df.columns.str.strip()
+
+    # Map existing columns to required columns
+    df = df.rename(columns={
+        'Awarded Supplier': 'Awarded Supplier Name'
+        # Add more mappings if necessary
+    })
+
+    # Ensure the grouping column exists
+    if scenario_detail_grouping not in df.columns:
+        df[scenario_detail_grouping] = 'Unknown'  # Or handle accordingly
+
+    # Calculate 'Awarded Supplier Spend' if not present
+    if 'Awarded Supplier Spend' not in df.columns:
+        if 'Awarded Supplier Price' in df.columns and 'Awarded Volume' in df.columns:
+            df['Awarded Supplier Spend'] = df['Awarded Supplier Price'] * df['Awarded Volume']
+        else:
+            df['Awarded Supplier Spend'] = 0
+
+    # 'AST Baseline Spend' is 'Baseline Spend' calculated using 'Baseline Price'
+    if 'AST Baseline Spend' not in df.columns:
+        if 'Baseline Spend' in df.columns:
+            df['AST Baseline Spend'] = df['Baseline Spend']
+        elif 'Baseline Price' in df.columns and 'Bid Volume' in df.columns:
+            df['AST Baseline Spend'] = df['Baseline Price'] * df['Bid Volume']
+        else:
+            df['AST Baseline Spend'] = 0
+
+    # 'AST Savings' is 'AST Baseline Spend' - 'Awarded Supplier Spend'
+    if 'AST Savings' not in df.columns:
+        df['AST Savings'] = df['AST Baseline Spend'] - df['Awarded Supplier Spend']
+
+    # 'Current Baseline Spend' is calculated using 'Current Price' if available
+    if 'Current Baseline Spend' not in df.columns:
+        if 'Current Price' in df.columns and 'Bid Volume' in df.columns:
+            df['Current Baseline Spend'] = df['Current Price'] * df['Bid Volume']
+        else:
+            df['Current Baseline Spend'] = df['AST Baseline Spend']  # If Current Price not available
+
+    # 'Current Savings' is 'Current Baseline Spend' - 'Awarded Supplier Spend'
+    if 'Current Savings' not in df.columns:
+        df['Current Savings'] = df['Current Baseline Spend'] - df['Awarded Supplier Spend']
+
+    # Ensure 'Awarded Volume' exists
+    if 'Awarded Volume' not in df.columns:
+        # Calculate 'Awarded Volume' if possible
+        if 'Bid Volume' in df.columns:
+            df['Awarded Volume'] = df['Bid Volume']
+        else:
+            df['Awarded Volume'] = 0
+
+    # Ensure 'Incumbent' exists
+    if 'Incumbent' not in df.columns:
+        df['Incumbent'] = 'Unknown'  # Or handle accordingly
+
+    # Ensure 'Bid ID' exists
+    if 'Bid ID' not in df.columns:
+        df['Bid ID'] = df.index  # Or another method to assign unique IDs
+
+    # Ensure required columns exist
+    expected_columns = [
+        'Awarded Supplier Name',
+        'Awarded Supplier Spend',
+        'AST Savings',
+        'Current Savings',
+        'AST Baseline Spend',
+        'Current Baseline Spend',
+        scenario_detail_grouping  # Include the grouping column
+    ]
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = 0
+
+    return df
+
+
+
+def create_scenario_summary_presentation(scenario_dataframes, template_file_path=None):
+    """
+    Creates a Presentation object based on the scenario DataFrames and a template file.
+
+    Parameters:
+    - scenario_dataframes: Dictionary of scenario DataFrames.
+    - template_file_path: Path to the PowerPoint template file.
+    """
+    try:
+        # Load the template if provided
+        if template_file_path and os.path.exists(template_file_path):
+            prs = Presentation(template_file_path)
+            logger.info(f"Loaded PowerPoint template from {template_file_path}")
+        else:
+            prs = Presentation()
+            if template_file_path:
+                logger.warning(f"Template file not found at {template_file_path}. Using default presentation.")
+            else:
+                logger.info("No template file provided. Using default presentation.")
+
+        # Use sheet names without '#' for display
+        scenario_keys = list(scenario_dataframes.keys())
+        scenarios = [sheet_name.lstrip('#') for sheet_name in scenario_keys]
+
+        scenarios_per_slide = 3
+        total_slides = (len(scenarios) + scenarios_per_slide - 1) // scenarios_per_slide
+
+        scenario_index = 0
+
+        # Retrieve the grouping field selected by the user
+        scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
+
+        # Check if scenario_detail_grouping is None
+        if not scenario_detail_grouping:
+            st.error("Please select a grouping field for the scenario detail slides.")
+            return None
+
+        for slide_num in range(1, total_slides + 1):
+            if slide_num == 1 and len(prs.slides) > 0:
+                # Use the existing first slide
+                slide = prs.slides[0]
+                logger.info("Modifying the existing first slide.")
+                # Remove shapes from the slide if necessary
+                for shape in list(slide.shapes):
+                    sp = shape.element
+                    sp.getparent().remove(sp)
+            else:
+                # For subsequent slides, add new slides
+                default_slide_layout_index = 1  # Replace with the correct index for "Default Slide"
+                slide_layout = prs.slide_layouts[default_slide_layout_index]
+                slide = prs.slides.add_slide(slide_layout)
+                # Remove shapes from the new slide if necessary
+                for shape in list(slide.shapes):
+                    sp = shape.element
+                    sp.getparent().remove(sp)
+
+            add_header(slide, slide_num)
+            add_row_labels(slide)
+
+            scenario_names = []
+            ast_savings_list = []
+            current_savings_list = []
+
+            for i in range(scenarios_per_slide):
+                if scenario_index >= len(scenarios):
+                    break
+                scenario_name = scenarios[scenario_index]
+                scenario_key = scenario_keys[scenario_index]  # The sheet name with '#'
+                df = scenario_dataframes[scenario_key]
+
+                # Process df to ensure required columns
+                df = process_scenario_dataframe(df, scenario_detail_grouping)
+
+                add_scenario_content(slide, df, scenario_name, scenario_position=i+1)
+
+                total_ast_savings = df['AST Savings'].sum()
+                total_current_savings = df['Current Savings'].sum()
+                ast_savings_list.append(total_ast_savings)
+                current_savings_list.append(total_current_savings)
+                scenario_names.append(scenario_name)
+
+                # Add detailed slide for this scenario
+                detail_slide_layout_index = 1  # Replace with the correct index for the detail slide layout
+                add_scenario_detail_slide(prs, df, scenario_name, detail_slide_layout_index, scenario_detail_grouping)
+
+                scenario_index += 1
+
+            add_chart(slide, scenario_names, ast_savings_list, current_savings_list)
+
+        return prs
+
+    except Exception as e:
+        st.error(f"An error occurred while generating the presentation: {str(e)}")
+        logger.error(f"Error generating presentation: {str(e)}")
+        return None
+
+
+def add_scenario_detail_slide(prs, df, scenario_name, template_slide_layout_index, scenario_detail_grouping):
+    """
+    Adds a detailed slide for the given scenario to the presentation.
+
+    Parameters:
+    - prs: The PowerPoint presentation object.
+    - df: The DataFrame containing the scenario data, including the grouping column.
+    - scenario_name: The name of the scenario.
+    - template_slide_layout_index: The index of the slide layout to use.
+    - scenario_detail_grouping: The column name to group data by.
+    """
+    # Necessary imports
+    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
+    from pptx.chart.data import ChartData, CategoryChartData
+    from pptx.dml.color import RGBColor
+    from pptx.util import Inches, Pt
+    from pptx.enum.dml import MSO_THEME_COLOR
+    from pptx.enum.text import MSO_ANCHOR
+    from itertools import cycle
+    from collections import OrderedDict
+
+    # Ensure the grouping column is in the DataFrame
+    if scenario_detail_grouping not in df.columns:
+        print(f"The selected grouping field '{scenario_detail_grouping}' is not present in the data.")
+        return
+
+    # Add a new slide using the specified layout
+    slide_layout = prs.slide_layouts[template_slide_layout_index]
+    slide = prs.slides.add_slide(slide_layout)
+
+    # Remove existing shapes if necessary
+    for shape in list(slide.shapes):
+        sp = shape.element
+        sp.getparent().remove(sp)
+
+    # Add Header
+    left = Inches(0)
+    top = Inches(0.01)
+    width = Inches(12.5)
+    height = Inches(0.5)
+    header = slide.shapes.add_textbox(left, top, width, height)
+    header_tf = header.text_frame
+    header_tf.vertical_anchor = MSO_ANCHOR.TOP
+    header_tf.word_wrap = True
+    p = header_tf.paragraphs[0]
+    p.text = f"{scenario_name} Scenario Details"
+    p.font.size = Pt(25)
+    p.font.name = "Calibri"
+    p.font.color.rgb = RGBColor(0, 51, 153)  # Dark Blue
+    p.font.bold = True
+    header.fill.background()  # No Fill
+    header.line.fill.background()  # No Line
+
+    # Calculate percentage of awarded volume for each supplier
+    total_awarded_volume = df['Awarded Volume'].sum()
+    supplier_volumes = df.groupby('Awarded Supplier Name')['Awarded Volume'].sum().reset_index()
+    supplier_volumes['Volume %'] = supplier_volumes['Awarded Volume'] / total_awarded_volume
+
+    # Sort suppliers by 'Volume %' in descending order
+    supplier_volumes = supplier_volumes.sort_values(by='Volume %', ascending=False)
+
+    # Prepare data for the chart
+    suppliers = supplier_volumes['Awarded Supplier Name'].tolist()
+    volume_percentages = supplier_volumes['Volume %'].tolist()
+
+    # Create a consistent color mapping for suppliers
+    unique_suppliers = list(OrderedDict.fromkeys(df['Awarded Supplier Name'].tolist() + df['Incumbent'].tolist()))
+    # Expanded color palette to include 25 colors
+    colorful_palette_3 = [
+        RGBColor(68, 114, 196),   # Dark Blue
+        RGBColor(237, 125, 49),   # Orange
+        RGBColor(165, 165, 165),  # Gray
+        RGBColor(255, 192, 0),    # Gold
+        RGBColor(112, 173, 71),   # Green
+        RGBColor(91, 155, 213),   # Light Blue
+        RGBColor(193, 152, 89),   # Brown
+        RGBColor(155, 187, 89),   # Olive Green
+        RGBColor(128, 100, 162),  # Purple
+        RGBColor(158, 72, 14),    # Dark Orange
+        RGBColor(99, 99, 99),     # Dark Gray
+        RGBColor(133, 133, 133),  # Medium Gray
+        RGBColor(49, 133, 156),   # Teal
+        RGBColor(157, 195, 230),  # Sky Blue
+        RGBColor(75, 172, 198),   # Aqua
+        RGBColor(247, 150, 70),   # Light Orange
+        RGBColor(128, 128, 0),    # Olive
+        RGBColor(192, 80, 77),    # Dark Red
+        RGBColor(0, 176, 80),     # Bright Green
+        RGBColor(79, 129, 189),   # Steel Blue
+        RGBColor(192, 0, 0),      # Red
+        RGBColor(0, 112, 192),    # Medium Blue
+        RGBColor(0, 176, 240),    # Cyan
+        RGBColor(255, 0, 0),      # Bright Red
+        RGBColor(146, 208, 80),   # Light Green
+    ]
+    color_cycle = cycle(colorful_palette_3)
+    supplier_color_map = {}
+    for supplier in unique_suppliers:
+        supplier_color_map[supplier] = next(color_cycle)
+
+    # Create the horizontal stacked bar chart
+    chart_data = CategoryChartData()
+    chart_data.categories = ['']
+
+    for supplier, volume_pct in zip(suppliers, volume_percentages):
+        chart_data.add_series(supplier, [volume_pct])
+
+    # Define the chart size and position
+    x, y, cx, cy = Inches(0), Inches(0.3), Inches(9.0), Inches(1.7)  # Adjusted width to 9.0 inches
+    chart = slide.shapes.add_chart(
+        XL_CHART_TYPE.BAR_STACKED, x, y, cx, cy, chart_data
+    ).chart
+
+    # Format the chart
+    chart.has_title = True
+    chart.chart_title.text_frame.text = "% of Volume"
+
+    # Ensure legend is created
+    chart.has_legend = True
+    if chart.legend:
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.include_in_layout = False
+        chart.legend.font.size = Pt(12)
+        chart.legend.font.name = "Calibri"
+
+    # Hide the value axis (vertical axis)
+    if chart.value_axis:
+        chart.value_axis.visible = False
+
+    # Format data labels and series colors
+    for idx, series in enumerate(chart.series):
+        series.has_data_labels = True
+        data_labels = series.data_labels
+        data_labels.show_value = True
+        data_labels.number_format = '0%'
+        data_labels.position = XL_LABEL_POSITION.INSIDE_BASE
+        data_labels.font.size = Pt(10)
+        data_labels.font.color.rgb = RGBColor(255, 255, 255)  # White
+
+        # Set series color
+        supplier = series.name
+        color = supplier_color_map.get(supplier, RGBColor(0x00, 0x00, 0x00))  # Default to black
+        fill = series.format.fill
+        fill.solid()
+        fill.fore_color.rgb = color
+
+    # Calculate Transitions and Items
+    num_bid_ids = df['Bid ID'].nunique()
+    transitions_df = df[df['Awarded Supplier Name'] != df['Incumbent']]
+    num_transitions = transitions_df['Bid ID'].nunique()
+
+    # Add Transitions Box
+    left = Inches(11.14)
+    top = Inches(0.65)
+    width = Inches(2.0)
+    height = Inches(1.0)
+    transitions_box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+    transitions_box.fill.solid()
+    transitions_box.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
+    transitions_box.line.fill.background()  # No Line
+
+    # Add text to the transitions box
+    tb = transitions_box.text_frame
+    tb.text = f"# of Transitions\n{num_transitions}"
+    tb.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    # Set alignment and font properties for all paragraphs
+    for paragraph in tb.paragraphs:
+        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.font.size = Pt(20)
+        paragraph.font.color.rgb = RGBColor(255, 255, 255)  # White
+
+    # Add Items Box
+    left = Inches(8.97)
+    items_box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+    items_box.fill.solid()
+    items_box.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_2
+    items_box.line.fill.background()  # No Line
+
+    # Add text to the items box
+    tb = items_box.text_frame
+    tb.text = f"# of items\n{num_bid_ids}"
+    tb.vertical_anchor = MSO_ANCHOR.MIDDLE
+
+    # Set alignment and font properties for all paragraphs
+    for paragraph in tb.paragraphs:
+        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.font.size = Pt(20)
+        paragraph.font.color.rgb = RGBColor(255, 255, 255)  # White
+
+    # Process data for the table
+    grouped_df = df.groupby(scenario_detail_grouping)
+    summary_data = []
+
+    for group_name, group_df in grouped_df:
+        bid_volume = group_df['Bid Volume'].sum()
+        avg_current_price = group_df['Current Price'].mean()
+        current_spend = avg_current_price * bid_volume
+        avg_bid_price = group_df['Awarded Supplier Price'].mean()
+        bid_spend = avg_bid_price * bid_volume
+        current_savings = group_df['Current Savings'].sum()
+
+        # Collect Incumbent and Awarded Supplier distributions
+        incumbent_dist = group_df.groupby('Incumbent')['Bid Volume'].sum().reset_index()
+        awarded_supplier_dist = group_df.groupby('Awarded Supplier Name')['Bid Volume'].sum().reset_index()
+
+        # Append data to the summary list
+        summary_data.append({
+            'Grouping': group_name,
+            'Bid Volume': bid_volume,
+            'Incumbent Dist': incumbent_dist,
+            'Avg Current Price': avg_current_price,
+            'Current Spend': current_spend,
+            'Awarded Supplier Dist': awarded_supplier_dist,
+            'Avg Bid Price': avg_bid_price,
+            'Bid Spend': bid_spend,
+            'Current Savings': current_savings
+        })
+
+    summary_df = pd.DataFrame(summary_data)
+
+    # Create the table
+    rows = len(summary_df) + 2  # Including header row and totals row
+    cols = 9  # Number of columns
+
+    left = Inches(0.5)
+    top = Inches(2.0)  # Table starts 2 inches from the top
+    width = Inches(12.5)
+    table = slide.shapes.add_table(rows, cols, left, top, width, Inches(1)).table  # Initial height
+
+    # Set column headers
+    column_headers = [
+        scenario_detail_grouping,
+        'Bid Volume',
+        'Incumbent',
+        'Avg Current Price',
+        'Current Spend',
+        'Awarded Supplier',
+        'Avg Bid Price',
+        'Bid Spend',
+        'Current Savings'
+    ]
+
+    for col_idx, header in enumerate(column_headers):
+        cell = table.cell(0, col_idx)
+        cell.text = header
+        # Apply header formatting
+        paragraph = cell.text_frame.paragraphs[0]
+        paragraph.font.bold = True
+        paragraph.font.size = Pt(12)
+        paragraph.font.name = "Calibri"
+        paragraph.alignment = PP_ALIGN.CENTER
+
+    # Adjust column widths to accommodate pie charts
+    table.columns[2].width = Inches(1.5)  # Incumbent
+    table.columns[5].width = Inches(1.5)  # Awarded Supplier
+
+    # Set header row height
+    table.rows[0].height = Inches(0.38)
+
+    # Set data rows heights
+    for row_idx in range(1, len(summary_df) + 1):
+        table.rows[row_idx].height = Inches(1.0)
+
+    # Set totals row height
+    total_row_idx = len(summary_df) + 1
+    table.rows[total_row_idx].height = Inches(0.38)
+
+    # Populate table rows and add pie charts
+    for row_idx, data in enumerate(summary_data, start=1):
+        table.cell(row_idx, 0).text = str(data['Grouping'])
+        table.cell(row_idx, 1).text = f"{data['Bid Volume']:,.0f}"
+        table.cell(row_idx, 3).text = f"${data['Avg Current Price']:.2f}"
+        table.cell(row_idx, 4).text = format_currency_in_millions(data['Current Spend'])
+        table.cell(row_idx, 6).text = f"${data['Avg Bid Price']:.2f}"
+        table.cell(row_idx, 7).text = format_currency_in_millions(data['Bid Spend'])
+        table.cell(row_idx, 8).text = format_currency_in_millions(data['Current Savings'])
+
+        # Center align text in cells
+        for col_idx in [0, 1, 3, 4, 6, 7, 8]:
+            cell = table.cell(row_idx, col_idx)
+            paragraph = cell.text_frame.paragraphs[0]
+            paragraph.alignment = PP_ALIGN.CENTER
+            paragraph.font.size = Pt(10)
+            paragraph.font.name = 'Calibri'
+
+        # Calculate positions for pie charts
+        # Incumbent Pie Chart in 'Incumbent' cell (col_idx = 2)
+        col_idx = 2
+        # Get the position and size of the cell
+        cell_left = left + sum([table.columns[i].width for i in range(col_idx)])
+        cell_top = top + Inches(0.38) + Inches(1.0) * (row_idx - 1)
+        cell_width = table.columns[col_idx].width
+        cell_height = table.rows[row_idx].height
+
+        # Create the pie chart data
+        incumbent_chart_data = ChartData()
+        incumbent_chart_data.categories = data['Incumbent Dist']['Incumbent']
+        incumbent_chart_data.add_series('', data['Incumbent Dist']['Bid Volume'])
+
+        # Add the pie chart
+        incumbent_chart = slide.shapes.add_chart(
+            XL_CHART_TYPE.PIE, cell_left, cell_top, cell_width, cell_height, incumbent_chart_data
+        ).chart
+
+        # Disable chart title and legend
+        incumbent_chart.has_title = False
+        incumbent_chart.has_legend = False
+
+        # Set colors for data points
+        for idx_point, point in enumerate(incumbent_chart.series[0].points):
+            category = data['Incumbent Dist']['Incumbent'].iloc[idx_point]
+            color = supplier_color_map.get(category, RGBColor(0x00, 0x00, 0x00))
+            fill = point.format.fill
+            fill.solid()
+            fill.fore_color.rgb = color
+
+        # Disable data labels
+        for series in incumbent_chart.series:
+            series.has_data_labels = False
+
+        # Awarded Supplier Pie Chart in 'Awarded Supplier' cell (col_idx = 5)
+        col_idx = 5
+        # Get the position and size of the cell
+        cell_left = left + sum([table.columns[i].width for i in range(col_idx)])
+        cell_top = top + Inches(0.38) + Inches(1.0) * (row_idx - 1)
+        cell_width = table.columns[col_idx].width
+        cell_height = table.rows[row_idx].height
+
+        # Create the pie chart data
+        awarded_chart_data = ChartData()
+        awarded_chart_data.categories = data['Awarded Supplier Dist']['Awarded Supplier Name']
+        awarded_chart_data.add_series('', data['Awarded Supplier Dist']['Bid Volume'])
+
+        # Add the pie chart
+        awarded_chart = slide.shapes.add_chart(
+            XL_CHART_TYPE.PIE, cell_left, cell_top, cell_width, cell_height, awarded_chart_data
+        ).chart
+
+        # Disable chart title and legend
+        awarded_chart.has_title = False
+        awarded_chart.has_legend = False
+
+        # Set colors for data points
+        for idx_point, point in enumerate(awarded_chart.series[0].points):
+            category = data['Awarded Supplier Dist']['Awarded Supplier Name'].iloc[idx_point]
+            color = supplier_color_map.get(category, RGBColor(0x00, 0x00, 0x00))
+            fill = point.format.fill
+            fill.solid()
+            fill.fore_color.rgb = color
+
+        # Disable data labels
+        for series in awarded_chart.series:
+            series.has_data_labels = False
+
+    # Add Totals row
+    total_bid_volume = summary_df['Bid Volume'].sum()
+    total_current_spend = summary_df['Current Spend'].sum()
+    total_bid_spend = summary_df['Bid Spend'].sum()
+    total_current_savings = summary_df['Current Savings'].sum()
+    
+    # Calculate weighted average prices
+    total_avg_current_price = (
+        (summary_df['Avg Current Price'] * summary_df['Bid Volume']).sum() / total_bid_volume
+    )
+    total_avg_bid_price = (
+        (summary_df['Avg Bid Price'] * summary_df['Bid Volume']).sum() / total_bid_volume
+    )
+
+    total_row_idx = len(summary_df) + 1  # Totals row index
+
+    table.cell(total_row_idx, 0).text = "Totals"
+    table.cell(total_row_idx, 1).text = f"{total_bid_volume:,.0f}"
+    table.cell(total_row_idx, 3).text = f"${total_avg_current_price:.2f}"
+    table.cell(total_row_idx, 4).text = format_currency_in_millions(total_current_spend)
+    table.cell(total_row_idx, 6).text = f"${total_avg_bid_price:.2f}"
+    table.cell(total_row_idx, 7).text = format_currency_in_millions(total_bid_spend)
+    table.cell(total_row_idx, 8).text = format_currency_in_millions(total_current_savings)
+
+    # Bold and center align the totals row
+    for col_idx in range(cols):
+        cell = table.cell(total_row_idx, col_idx)
+        paragraph = cell.text_frame.paragraphs[0]
+        paragraph.font.bold = True
+        paragraph.alignment = PP_ALIGN.CENTER
+        paragraph.font.size = Pt(10)
+        paragraph.font.name = 'Calibri'
+
+
+
 
 # Project Management Functions
 def get_user_projects(username):
@@ -952,6 +2065,7 @@ def main():
         st.session_state.selected_subfolder = None
     if 'customizable_grouping_column' not in st.session_state:
         st.session_state.customizable_grouping_column = None
+
 
     # Header with logo and page title
     st.markdown(
@@ -1229,8 +2343,10 @@ def main():
 
         # Proceed to Column Mapping if merged_data is available
         if st.session_state.merged_data is not None:
-            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price',
-                                'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
+            required_columns = ['Bid ID', 'Incumbent', 'Facility', 'Baseline Price', 'Current Price',
+                    'Bid Volume', 'Bid Price', 'Supplier Capacity', 'Supplier Name']
+
+
 
             # Initialize column_mapping if not already initialized
             if 'column_mapping' not in st.session_state:
@@ -1239,11 +2355,20 @@ def main():
             # Map columns
             st.write("Map the following columns:")
             for col in required_columns:
-                st.session_state.column_mapping[col] = st.selectbox(
-                    f"Select Column for {col}",
-                    st.session_state.merged_data.columns,
-                    key=f"{col}_mapping"
-                )
+                if col == 'Current Price':
+                    options = ['None'] + list(st.session_state.merged_data.columns)
+                    st.session_state.column_mapping[col] = st.selectbox(
+                        f"Select Column for {col}",
+                        options,
+                        key=f"{col}_mapping"
+                    )
+                else:
+                    st.session_state.column_mapping[col] = st.selectbox(
+                        f"Select Column for {col}",
+                        st.session_state.merged_data.columns,
+                        key=f"{col}_mapping"
+                    )
+
 
             # After mapping, check if all required columns are mapped
             missing_columns = [col for col in required_columns if col not in st.session_state.column_mapping or st.session_state.column_mapping[col] not in st.session_state.merged_data.columns]
@@ -1262,6 +2387,11 @@ def main():
                 "Bid Coverage Report",
                 "Customizable Analysis"
             ])
+
+                # New Presentation Summaries multi-select
+            presentation_options = ["Scenario Summary", "Bid Coverage Summary", "Supplier Comparison Summary"] 
+            selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
+
 
 
             # Exclusion rules for Best of Best Excluding Suppliers
@@ -1356,10 +2486,36 @@ def main():
                     st.session_state.grouping_column_mapped = grouping_column_mapped
                     st.session_state.grouping_column_already_mapped = grouping_column_already_mapped
 
+
+            if "Scenario Summary" in selected_presentations:
+                with st.expander("Configure Grouping for Scenario Summary Slides"):
+                    st.header("Scenario Summary Grouping")
+
+                    # Select group by field
+                    grouping_options = st.session_state.merged_data.columns.tolist()
+                    st.selectbox("Group by", grouping_options, key="scenario_detail_grouping")
+
+
+            if "Bid Coverage Summary" in selected_presentations:
+                with st.expander("Configure Grouping for Bid Coverage Slides"):
+                    st.header("Bid Coverage Grouping")
+               
+                    # Select group by field
+                    bid_coverage_slides_grouping = st.selectbox("Group by", st.session_state.merged_data.columns, key="bid_coverage_slides_grouping")
+
+            if "Supplier Comparison Summary" in selected_presentations:
+                with st.expander("Configure Grouping for Supplier Comparison Summary"):
+                    st.header("Supplier Comparison Summary")
+               
+                    # Select group by field
+                    supplier_comparison_summary_grouping = st.selectbox("Group by", st.session_state.merged_data.columns, key="supplier_comparison_summary_grouping")
+
             if st.button("Run Analysis"):
                 with st.spinner("Running analysis..."):
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    excel_output = BytesIO()
+                    ppt_output = BytesIO()
+                    ppt_data = None
+                    with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
                         baseline_data = st.session_state.baseline_data
                         original_merged_data = st.session_state.original_merged_data
 
@@ -1367,14 +2523,14 @@ def main():
                         if "As-Is" in analyses_to_run:
                             as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                             as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
-                            as_is_df.to_excel(writer, sheet_name='As-Is', index=False)
+                            as_is_df.to_excel(writer, sheet_name='#As-Is', index=False)
                             logger.info("As-Is analysis completed.")
 
                         # Best of Best Analysis
                         if "Best of Best" in analyses_to_run:
                             best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                             best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
-                            best_of_best_df.to_excel(writer, sheet_name='Best of Best', index=False)
+                            best_of_best_df.to_excel(writer, sheet_name='#Best of Best', index=False)
                             logger.info("Best of Best analysis completed.")
 
                         # Best of Best Excluding Suppliers Analysis
@@ -1382,7 +2538,7 @@ def main():
                             exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
                             best_of_best_excl_df = best_of_best_excluding_suppliers(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_bob)
                             best_of_best_excl_df = add_missing_bid_ids(best_of_best_excl_df, original_merged_data, st.session_state.column_mapping, 'BOB Excl Suppliers')
-                            best_of_best_excl_df.to_excel(writer, sheet_name='BOB Excl Suppliers', index=False)
+                            best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
                             logger.info("Best of Best Excluding Suppliers analysis completed.")
 
                         # As-Is Excluding Suppliers Analysis
@@ -1390,7 +2546,7 @@ def main():
                             exclusions_list_ais = st.session_state.exclusions_ais if 'exclusions_ais' in st.session_state else []
                             as_is_excl_df = as_is_excluding_suppliers_analysis(st.session_state.merged_data, st.session_state.column_mapping, exclusions_list_ais)
                             as_is_excl_df = add_missing_bid_ids(as_is_excl_df, original_merged_data, st.session_state.column_mapping, 'As-Is Excl Suppliers')
-                            as_is_excl_df.to_excel(writer, sheet_name='As-Is Excl Suppliers', index=False)
+                            as_is_excl_df.to_excel(writer, sheet_name='#As-Is Excl Suppliers', index=False)
                             logger.info("As-Is Excluding Suppliers analysis completed.")
 
                         # Bid Coverage Report Processing
@@ -2049,19 +3205,122 @@ def main():
 
 
 
-
+                    # //// Download Analysis to Spreadsheet ////// #
 
                     # Convert the buffer to bytes
-                    processed_data = output.getvalue()
+                    #writer.save()
+                    excel_output.seek(0)
+                    excel_data = excel_output.getvalue()
 
-                    # Provide a download button for the user
+                    # Read the Excel file into a pandas ExcelFile object
+                    scenario_excel_file = pd.ExcelFile(BytesIO(excel_data))
+                    # Get list of sheet names starting with '#'
+                    scenario_sheet_names = [sheet_name for sheet_name in scenario_excel_file.sheet_names if sheet_name.startswith('#')]
+                    scenario_dataframes = {}
+                    for sheet_name in scenario_sheet_names:
+                        df = pd.read_excel(scenario_excel_file, sheet_name=sheet_name)
+                        scenario_dataframes[sheet_name] = df
+
+
+                    # Generate PowerPoint File if presentations are selected
+                    if selected_presentations:
+                        try:
+                            # Construct the template file path
+                            script_dir = os.path.dirname(os.path.abspath(__file__))
+                            template_file_path = os.path.join(script_dir, 'Slide template.pptx')
+
+                            # Read the Excel file into a pandas ExcelFile object
+                            excel_file = pd.ExcelFile(BytesIO(excel_data))
+
+                            # Use 'original_merged_data' from your existing variables
+                            # Ensure that 'original_merged_data' is available in this scope
+                            if 'original_merged_data' in globals() or 'original_merged_data' in locals():
+                                original_df = original_merged_data.copy()
+                            else:
+                                st.error("The 'original_merged_data' DataFrame is not available.")
+                                original_df = None  # Set to None to handle the error later
+
+                            # Get list of sheet names starting with '#'
+                            scenario_sheet_names = [sheet_name for sheet_name in excel_file.sheet_names if sheet_name.startswith('#')]
+
+                            scenario_dataframes = {}
+                            for sheet_name in scenario_sheet_names:
+                                df = pd.read_excel(excel_file, sheet_name=sheet_name)
+
+                                # Ensure 'Bid ID' exists in df
+                                if 'Bid ID' not in df.columns:
+                                    st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'.")
+                                    continue  # Skip this scenario
+
+                                # Retrieve the grouping field selected by the user
+                                scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
+                                if scenario_detail_grouping is None:
+                                    st.error("Please select a grouping field for the scenario detail slides.")
+                                    continue  # Skip this scenario
+
+                                # Ensure 'Bid ID' and the grouping column exist in original_df
+                                if original_df is not None and 'Bid ID' in original_df.columns:
+                                    if scenario_detail_grouping in original_df.columns:
+                                        # Merge the grouping column into df based on 'Bid ID'
+                                        df = df.merge(original_df[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
+                                        if scenario_detail_grouping not in df.columns:
+                                            st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into the scenario data for '{sheet_name}'.")
+                                            continue  # Skip this scenario
+                                    else:
+                                        st.error(f"The selected grouping field '{scenario_detail_grouping}' is not present in 'original_merged_data'.")
+                                        continue  # Skip this scenario
+                                else:
+                                    st.error("The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'.")
+                                    continue  # Skip this scenario
+
+                                scenario_dataframes[sheet_name] = df
+
+                            if not scenario_dataframes:
+                                st.error("No valid scenario dataframes were created. Please check your data.")
+                            else:
+                                # Generate the presentation
+                                prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
+
+                                if not prs:
+                                    st.error("Failed to generate Scenario Summary presentation.")
+                                else:
+                                    # Save the presentation to BytesIO
+                                    prs.save(ppt_output)
+                                    ppt_data = ppt_output.getvalue()
+                        except Exception as e:
+                            st.error(f"An error occurred while generating the presentation: {e}")
+                            logger.error(f"Error generating presentation: {e}")
+                            ppt_data = None  # Ensure ppt_data is set to None if generation fails
+                    else:
+                        ppt_data = None  # No presentations selected
+
+                    # Store files in session state
+                    st.session_state.excel_data = excel_data
+                    st.session_state.ppt_data = ppt_data
+
+
+                    # Display download buttons
+                    st.success("Analysis completed successfully. Please download your files below.")
+
+                    # Excel download button
                     st.download_button(
-                        label="Download Analysis Results",
-                        data=processed_data,
+                        label="Download Analysis Results (Excel)",
+                        data=st.session_state.excel_data,
                         file_name="scenario_analysis_results.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     logger.info("Analysis results prepared for download.")
+
+                    # PowerPoint download button (only if data is available)
+                    if st.session_state.ppt_data:
+                        st.download_button(
+                            label="Download Presentation (PowerPoint)",
+                            data=st.session_state.ppt_data,
+                            file_name="presentation_summary.pptx",
+                            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        )
+                        logger.info("Presentation prepared for download.")
+
 
 
 
