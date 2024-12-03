@@ -2491,9 +2491,19 @@ def main():
                 with st.expander("Configure Grouping for Scenario Summary Slides"):
                     st.header("Scenario Summary Grouping")
 
+                    
                     # Select group by field
                     grouping_options = st.session_state.merged_data.columns.tolist()
-                    st.selectbox("Group by", grouping_options, key="scenario_detail_grouping")
+                    st.selectbox("Group by for Scenario Detail", grouping_options, key="scenario_detail_grouping")
+
+                    on = st.toggle("Include Sub-Scenario Summaries?")
+
+                    if on:
+                        # Select scenario summary fields
+                        scenario_summary_fields = st.session_state.merged_data.columns.tolist()
+                        scenario_summary_group_selection = st.selectbox("Scenario Summaries Selections", scenario_summary_fields, key="scenario_summary_selections")
+                        st.pills("Select scenario sub-summaries", st.session_state.merged_data[scenario_summary_group_selection].unique(), selection_mode="multi", key="value_excl_ais")
+
 
 
             if "Bid Coverage Summary" in selected_presentations:
@@ -3240,53 +3250,69 @@ def main():
                                 st.error("The 'original_merged_data' DataFrame is not available.")
                                 original_df = None  # Set to None to handle the error later
 
-                            # Get list of sheet names starting with '#'
-                            scenario_sheet_names = [sheet_name for sheet_name in excel_file.sheet_names if sheet_name.startswith('#')]
+                            # Retrieve the grouping field selected by the user
+                            scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
+                            if scenario_detail_grouping is None:
+                                st.error("Please select a grouping field for the scenario detail slides.")
+                                ppt_data = None  # Ensure ppt_data is set to None if generation fails
+                            else:
+                                # Get list of sheet names starting with '#'
+                                scenario_sheet_names = [sheet_name for sheet_name in excel_file.sheet_names if sheet_name.startswith('#')]
 
-                            scenario_dataframes = {}
-                            for sheet_name in scenario_sheet_names:
-                                df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                                scenario_dataframes = {}
+                                for sheet_name in scenario_sheet_names:
+                                    df = pd.read_excel(excel_file, sheet_name=sheet_name)
 
-                                # Ensure 'Bid ID' exists in df
-                                if 'Bid ID' not in df.columns:
-                                    st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'.")
-                                    continue  # Skip this scenario
+                                    # Ensure 'Bid ID' exists in df
+                                    if 'Bid ID' not in df.columns:
+                                        st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'. Skipping this sheet.")
+                                        continue  # Skip this scenario
 
-                                # Retrieve the grouping field selected by the user
-                                scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
-                                if scenario_detail_grouping is None:
-                                    st.error("Please select a grouping field for the scenario detail slides.")
-                                    continue  # Skip this scenario
-
-                                # Ensure 'Bid ID' and the grouping column exist in original_df
-                                if original_df is not None and 'Bid ID' in original_df.columns:
-                                    if scenario_detail_grouping in original_df.columns:
-                                        # Merge the grouping column into df based on 'Bid ID'
-                                        df = df.merge(original_df[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
-                                        if scenario_detail_grouping not in df.columns:
-                                            st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into the scenario data for '{sheet_name}'.")
+                                    # Check if the grouping column exists in df
+                                    if scenario_detail_grouping not in df.columns:
+                                        # Attempt to merge the grouping column into df based on 'Bid ID' from original_df
+                                        if original_df is not None and 'Bid ID' in original_df.columns:
+                                            if scenario_detail_grouping in original_df.columns:
+                                                # Convert 'Bid ID' columns to string to ensure they have the same data type
+                                                df['Bid ID'] = df['Bid ID'].astype(str)
+                                                original_df['Bid ID'] = original_df['Bid ID'].astype(str)
+                                                # Merge the grouping column into df based on 'Bid ID'
+                                                df = df.merge(
+                                                    original_df[['Bid ID', scenario_detail_grouping]],
+                                                    on='Bid ID',
+                                                    how='left'
+                                                )
+                                                if scenario_detail_grouping not in df.columns:
+                                                    st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into the scenario data for '{sheet_name}'. Skipping this sheet.")
+                                                    continue  # Skip this scenario
+                                            else:
+                                                st.error(f"The selected grouping field '{scenario_detail_grouping}' is not present in 'original_merged_data'. Skipping '{sheet_name}'.")
+                                                continue  # Skip this scenario
+                                        else:
+                                            st.error("The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'. Skipping merge.")
                                             continue  # Skip this scenario
                                     else:
-                                        st.error(f"The selected grouping field '{scenario_detail_grouping}' is not present in 'original_merged_data'.")
-                                        continue  # Skip this scenario
+                                        # Grouping column already exists in df; proceed without merging
+                                        pass
+
+
+                                    # Add the DataFrame to the scenario_dataframes dictionary
+                                    scenario_dataframes[sheet_name] = df
+
+                                if not scenario_dataframes:
+                                    st.error("No valid scenario dataframes were created. Please check your data.")
+                                    ppt_data = None  # Ensure ppt_data is set to None if generation fails
                                 else:
-                                    st.error("The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'.")
-                                    continue  # Skip this scenario
+                                    # Generate the presentation
+                                    prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
 
-                                scenario_dataframes[sheet_name] = df
-
-                            if not scenario_dataframes:
-                                st.error("No valid scenario dataframes were created. Please check your data.")
-                            else:
-                                # Generate the presentation
-                                prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
-
-                                if not prs:
-                                    st.error("Failed to generate Scenario Summary presentation.")
-                                else:
-                                    # Save the presentation to BytesIO
-                                    prs.save(ppt_output)
-                                    ppt_data = ppt_output.getvalue()
+                                    if not prs:
+                                        st.error("Failed to generate Scenario Summary presentation.")
+                                        ppt_data = None  # Ensure ppt_data is set to None if generation fails
+                                    else:
+                                        # Save the presentation to BytesIO
+                                        prs.save(ppt_output)
+                                        ppt_data = ppt_output.getvalue()
                         except Exception as e:
                             st.error(f"An error occurred while generating the presentation: {e}")
                             logger.error(f"Error generating presentation: {e}")
@@ -3297,6 +3323,7 @@ def main():
                     # Store files in session state
                     st.session_state.excel_data = excel_data
                     st.session_state.ppt_data = ppt_data
+
 
 
                     # Display download buttons
