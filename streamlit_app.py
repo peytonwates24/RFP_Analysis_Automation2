@@ -26,6 +26,8 @@ from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
 from pptx.chart.data import ChartData, CategoryChartData
+from itertools import cycle
+from collections import OrderedDict
 
 
 # Set up logging
@@ -1094,8 +1096,8 @@ def format_currency_in_millions(amount):
     else:
         return f"${amount_in_millions:,.1f}MM"
 
-def add_header(slide, slide_num):
-    """Adds the main header to the slide."""
+def add_header(slide, slide_num, title_suffix=""):
+    """Adds the main header to the slide, optionally including a title suffix for sub-summaries."""
     left = Inches(0)
     top = Inches(0.01)
     width = Inches(12.12)
@@ -1105,16 +1107,23 @@ def add_header(slide, slide_num):
     header_tf.vertical_anchor = MSO_ANCHOR.TOP
     header_tf.word_wrap = True
     p = header_tf.paragraphs[0]
-    if slide_num == 1:
+    if slide_num == 1 and not title_suffix:
         p.text = "Scenario Summary"
     else:
-        p.text = f"Scenario Summary #{slide_num}"
+        # If title_suffix is provided, incorporate it into the header.
+        # Example: "Scenario Summary (Port Hudson)"
+        if title_suffix:
+            p.text = f"Scenario Summary {title_suffix}"
+        else:
+            p.text = f"Scenario Summary #{slide_num}"
     p.font.size = Pt(25)
     p.font.name = "Calibri"
     p.font.color.rgb = RGBColor(0, 51, 153)  # Dark Blue
     p.font.bold = True
     header.fill.background()  # No Fill
     header.line.fill.background()  # No Line
+
+
 
 def add_row_labels(slide):
     """Adds row labels to the slide (once per slide)."""
@@ -1375,11 +1384,20 @@ def add_chart(slide, scenario_names, ast_savings_list, current_savings_list):
             run.font.bold = False
             run.font.color.rgb = RGBColor(0, 0, 0)  # Black
 
-def process_scenario_dataframe(df, scenario_detail_grouping):
+def process_scenario_dataframe(df, scenario_detail_grouping, require_grouping=True):
     """
-    Processes the scenario DataFrame to ensure required columns are present,
-    and includes the grouping column.
+    Processes the scenario DataFrame to ensure required columns are present.
+    If require_grouping=False, we do not insist on the scenario_detail_grouping column.
+
+    Parameters:
+    - df: DataFrame to process.
+    - scenario_detail_grouping: The grouping column name used for scenario details.
+    - require_grouping: boolean, if True scenario_detail_grouping must be included, otherwise it's optional.
+
+    Returns:
+    - df: Processed DataFrame with required columns added if necessary.
     """
+
     # Ensure columns are stripped
     df.columns = df.columns.str.strip()
 
@@ -1389,9 +1407,19 @@ def process_scenario_dataframe(df, scenario_detail_grouping):
         # Add more mappings if necessary
     })
 
-    # Ensure the grouping column exists
-    if scenario_detail_grouping not in df.columns:
-        df[scenario_detail_grouping] = 'Unknown'  # Or handle accordingly
+    # Base expected columns
+    expected_columns = [
+        'Awarded Supplier Name',
+        'Awarded Supplier Spend',
+        'AST Savings',
+        'Current Savings',
+        'AST Baseline Spend',
+        'Current Baseline Spend'
+    ]
+
+    # Only include scenario_detail_grouping if require_grouping is True
+    if require_grouping and scenario_detail_grouping:
+        expected_columns.append(scenario_detail_grouping)
 
     # Calculate 'Awarded Supplier Spend' if not present
     if 'Awarded Supplier Spend' not in df.columns:
@@ -1400,7 +1428,7 @@ def process_scenario_dataframe(df, scenario_detail_grouping):
         else:
             df['Awarded Supplier Spend'] = 0
 
-    # 'AST Baseline Spend' is 'Baseline Spend' calculated using 'Baseline Price'
+    # 'AST Baseline Spend'
     if 'AST Baseline Spend' not in df.columns:
         if 'Baseline Spend' in df.columns:
             df['AST Baseline Spend'] = df['Baseline Spend']
@@ -1409,24 +1437,23 @@ def process_scenario_dataframe(df, scenario_detail_grouping):
         else:
             df['AST Baseline Spend'] = 0
 
-    # 'AST Savings' is 'AST Baseline Spend' - 'Awarded Supplier Spend'
+    # 'AST Savings'
     if 'AST Savings' not in df.columns:
         df['AST Savings'] = df['AST Baseline Spend'] - df['Awarded Supplier Spend']
 
-    # 'Current Baseline Spend' is calculated using 'Current Price' if available
+    # 'Current Baseline Spend'
     if 'Current Baseline Spend' not in df.columns:
         if 'Current Price' in df.columns and 'Bid Volume' in df.columns:
             df['Current Baseline Spend'] = df['Current Price'] * df['Bid Volume']
         else:
-            df['Current Baseline Spend'] = df['AST Baseline Spend']  # If Current Price not available
+            df['Current Baseline Spend'] = df['AST Baseline Spend']
 
-    # 'Current Savings' is 'Current Baseline Spend' - 'Awarded Supplier Spend'
+    # 'Current Savings'
     if 'Current Savings' not in df.columns:
         df['Current Savings'] = df['Current Baseline Spend'] - df['Awarded Supplier Spend']
 
     # Ensure 'Awarded Volume' exists
     if 'Awarded Volume' not in df.columns:
-        # Calculate 'Awarded Volume' if possible
         if 'Bid Volume' in df.columns:
             df['Awarded Volume'] = df['Bid Volume']
         else:
@@ -1434,118 +1461,160 @@ def process_scenario_dataframe(df, scenario_detail_grouping):
 
     # Ensure 'Incumbent' exists
     if 'Incumbent' not in df.columns:
-        df['Incumbent'] = 'Unknown'  # Or handle accordingly
+        df['Incumbent'] = 'Unknown'
 
     # Ensure 'Bid ID' exists
     if 'Bid ID' not in df.columns:
-        df['Bid ID'] = df.index  # Or another method to assign unique IDs
+        df['Bid ID'] = df.index
 
-    # Ensure required columns exist
-    expected_columns = [
-        'Awarded Supplier Name',
-        'Awarded Supplier Spend',
-        'AST Savings',
-        'Current Savings',
-        'AST Baseline Spend',
-        'Current Baseline Spend',
-        scenario_detail_grouping  # Include the grouping column
-    ]
+    # Check expected columns
     for col in expected_columns:
         if col not in df.columns:
-            df[col] = 0
+            if col == scenario_detail_grouping and require_grouping:
+                # If grouping is required but not found, raise error
+                raise ValueError(f"Required grouping column '{scenario_detail_grouping}' not found in data.")
+            else:
+                # For non-grouping columns, just fill with 0 if not found
+                df[col] = 0
 
     return df
 
+def create_scenario_summary_slides(prs, scenario_dataframes, scenario_detail_grouping, title_suffix="", create_details=True, logger=logger):
+    """
+    Create scenario summary slides for the given scenario_dataframes and grouping.
+    If create_details=True, scenario detail slides are created (requiring scenario_detail_grouping).
+    If create_details=False, no detail slides are created and scenario_detail_grouping is not required.
 
+    The title_suffix (e.g., " (Port Hudson)") will appear in the header of the slides if provided.
+    """
+    scenario_keys = list(scenario_dataframes.keys())
+    scenarios = [sheet_name.lstrip('#') for sheet_name in scenario_keys]
+
+    logger.info(f"Creating scenario summary slides with title_suffix='{title_suffix}'. Scenarios: {scenarios}")
+
+    scenarios_per_slide = 3
+    total_slides = (len(scenarios) + scenarios_per_slide - 1) // scenarios_per_slide
+
+    scenario_index = 0
+
+    for slide_num in range(1, total_slides + 1):
+        if slide_num == 1 and len(prs.slides) > 0 and title_suffix == "":
+            # Modify the existing first slide only if this is the main scenario summary and no suffix
+            slide = prs.slides[0]
+            logger.info("Modifying the existing first slide for main scenario summary.")
+            for shape in list(slide.shapes):
+                sp = shape.element
+                sp.getparent().remove(sp)
+        else:
+            default_slide_layout_index = 1
+            slide_layout = prs.slide_layouts[default_slide_layout_index]
+            slide = prs.slides.add_slide(slide_layout)
+            for shape in list(slide.shapes):
+                sp = shape.element
+                sp.getparent().remove(sp)
+
+        add_header(slide, slide_num, title_suffix)
+        add_row_labels(slide)
+
+        scenario_names = []
+        ast_savings_list = []
+        current_savings_list = []
+
+        for i in range(scenarios_per_slide):
+            if scenario_index >= len(scenarios):
+                break
+            scenario_name = scenarios[scenario_index]
+            scenario_key = scenario_keys[scenario_index]
+            df = scenario_dataframes[scenario_key]
+
+            # Process df with or without requiring grouping
+            df = process_scenario_dataframe(df, scenario_detail_grouping, require_grouping=create_details)
+            df = df.fillna(0).replace([float('inf'), float('-inf')], 0)
+
+            add_scenario_content(slide, df, scenario_name, scenario_position=i+1)
+
+            total_ast_savings = df['AST Savings'].sum()
+            total_current_savings = df['Current Savings'].sum()
+            if pd.isna(total_ast_savings):
+                total_ast_savings = 0
+            if pd.isna(total_current_savings):
+                total_current_savings = 0
+
+            ast_savings_list.append(total_ast_savings)
+            current_savings_list.append(total_current_savings)
+            scenario_names.append(scenario_name)
+
+            if create_details:
+                detail_slide_layout_index = 1
+                add_scenario_detail_slide(prs, df, scenario_name, detail_slide_layout_index, scenario_detail_grouping)
+
+            scenario_index += 1
+
+        add_chart(slide, scenario_names, ast_savings_list, current_savings_list)
+
+    return prs
 
 def create_scenario_summary_presentation(scenario_dataframes, template_file_path=None):
     """
-    Creates a Presentation object based on the scenario DataFrames and a template file.
-
-    Parameters:
-    - scenario_dataframes: Dictionary of scenario DataFrames.
-    - template_file_path: Path to the PowerPoint template file.
+    Creates a Presentation object based on the scenario DataFrames and a template file,
+    including main scenario summaries and optional sub-summaries if toggled on.
     """
     try:
-        # Load the template if provided
         if template_file_path and os.path.exists(template_file_path):
             prs = Presentation(template_file_path)
             logger.info(f"Loaded PowerPoint template from {template_file_path}")
         else:
             prs = Presentation()
             if template_file_path:
-                logger.warning(f"Template file not found at {template_file_path}. Using default presentation.")
+                logger.warning("Template file not found. Using default presentation.")
             else:
                 logger.info("No template file provided. Using default presentation.")
 
-        # Use sheet names without '#' for display
-        scenario_keys = list(scenario_dataframes.keys())
-        scenarios = [sheet_name.lstrip('#') for sheet_name in scenario_keys]
-
-        scenarios_per_slide = 3
-        total_slides = (len(scenarios) + scenarios_per_slide - 1) // scenarios_per_slide
-
-        scenario_index = 0
-
-        # Retrieve the grouping field selected by the user
         scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
+        on = st.session_state.get("scenario_sub_summaries_on", False)
+        scenario_summary_selections = st.session_state.get("scenario_summary_selections", None)
+        sub_summaries_list = st.session_state.get("sub_summary_selections", [])
 
-        # Check if scenario_detail_grouping is None
-        if not scenario_detail_grouping:
-            st.error("Please select a grouping field for the scenario detail slides.")
-            return None
+        logger.info(f"Sub-summaries on: {on}")
+        logger.info(f"Scenario summary selections column: {scenario_summary_selections}")
+        logger.info(f"Chosen sub-summaries: {sub_summaries_list}")
 
-        for slide_num in range(1, total_slides + 1):
-            if slide_num == 1 and len(prs.slides) > 0:
-                # Use the existing first slide
-                slide = prs.slides[0]
-                logger.info("Modifying the existing first slide.")
-                # Remove shapes from the slide if necessary
-                for shape in list(slide.shapes):
-                    sp = shape.element
-                    sp.getparent().remove(sp)
-            else:
-                # For subsequent slides, add new slides
-                default_slide_layout_index = 1  # Replace with the correct index for "Default Slide"
-                slide_layout = prs.slide_layouts[default_slide_layout_index]
-                slide = prs.slides.add_slide(slide_layout)
-                # Remove shapes from the new slide if necessary
-                for shape in list(slide.shapes):
-                    sp = shape.element
-                    sp.getparent().remove(sp)
+        # Create main scenario summaries with details (requires scenario_detail_grouping)
+        prs = create_scenario_summary_slides(
+            prs=prs,
+            scenario_dataframes=scenario_dataframes,
+            scenario_detail_grouping=scenario_detail_grouping,
+            title_suffix="",
+            create_details=True,
+            logger=logger
+        )
 
-            add_header(slide, slide_num)
-            add_row_labels(slide)
+        # Handle sub-summaries if toggled on
+        if on and scenario_summary_selections and sub_summaries_list:
+            logger.info(f"Creating sub-summary slides for {scenario_summary_selections} values: {sub_summaries_list}")
+            for sub_val in sub_summaries_list:
+                filtered_dataframes = {}
+                for sheet_name, df in scenario_dataframes.items():
+                    if scenario_summary_selections in df.columns:
+                        sub_filtered_df = df[df[scenario_summary_selections] == sub_val]
+                        if not sub_filtered_df.empty:
+                            sub_filtered_df = sub_filtered_df.fillna(0).replace([float('inf'), float('-inf')], 0)
+                            filtered_dataframes[sheet_name] = sub_filtered_df.copy()
 
-            scenario_names = []
-            ast_savings_list = []
-            current_savings_list = []
-
-            for i in range(scenarios_per_slide):
-                if scenario_index >= len(scenarios):
-                    break
-                scenario_name = scenarios[scenario_index]
-                scenario_key = scenario_keys[scenario_index]  # The sheet name with '#'
-                df = scenario_dataframes[scenario_key]
-
-                # Process df to ensure required columns
-                df = process_scenario_dataframe(df, scenario_detail_grouping)
-
-                add_scenario_content(slide, df, scenario_name, scenario_position=i+1)
-
-                total_ast_savings = df['AST Savings'].sum()
-                total_current_savings = df['Current Savings'].sum()
-                ast_savings_list.append(total_ast_savings)
-                current_savings_list.append(total_current_savings)
-                scenario_names.append(scenario_name)
-
-                # Add detailed slide for this scenario
-                detail_slide_layout_index = 1  # Replace with the correct index for the detail slide layout
-                add_scenario_detail_slide(prs, df, scenario_name, detail_slide_layout_index, scenario_detail_grouping)
-
-                scenario_index += 1
-
-            add_chart(slide, scenario_names, ast_savings_list, current_savings_list)
+                if filtered_dataframes:
+                    logger.info(f"Creating sub-summary slides for '{sub_val}'.")
+                    # For sub-summaries, we only show scenario summaries (no details)
+                    # Thus create_details=False and no requirement for scenario_detail_grouping
+                    prs = create_scenario_summary_slides(
+                        prs=prs,
+                        scenario_dataframes=filtered_dataframes,
+                        scenario_detail_grouping=None,  # Not required here
+                        title_suffix=f" ({sub_val})",
+                        create_details=False,
+                        logger=logger
+                    )
+                else:
+                    logger.warning(f"No data found for sub-summary '{sub_val}'. No additional slides created.")
 
         return prs
 
@@ -1553,6 +1622,7 @@ def create_scenario_summary_presentation(scenario_dataframes, template_file_path
         st.error(f"An error occurred while generating the presentation: {str(e)}")
         logger.error(f"Error generating presentation: {str(e)}")
         return None
+
 
 
 def add_scenario_detail_slide(prs, df, scenario_name, template_slide_layout_index, scenario_detail_grouping):
@@ -1567,16 +1637,7 @@ def add_scenario_detail_slide(prs, df, scenario_name, template_slide_layout_inde
     - scenario_detail_grouping: The column name to group data by.
     """
     # Necessary imports
-    from pptx.enum.text import PP_ALIGN
-    from pptx.enum.shapes import MSO_SHAPE
-    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
-    from pptx.chart.data import ChartData, CategoryChartData
-    from pptx.dml.color import RGBColor
-    from pptx.util import Inches, Pt
-    from pptx.enum.dml import MSO_THEME_COLOR
-    from pptx.enum.text import MSO_ANCHOR
-    from itertools import cycle
-    from collections import OrderedDict
+
 
     # Ensure the grouping column is in the DataFrame
     if scenario_detail_grouping not in df.columns:
@@ -1944,6 +2005,207 @@ def add_scenario_detail_slide(prs, df, scenario_name, template_slide_layout_inde
         paragraph.alignment = PP_ALIGN.CENTER
         paragraph.font.size = Pt(10)
         paragraph.font.name = 'Calibri'
+
+
+# ///// Bid Coverage Summary Helper Functions /////
+
+
+def create_bid_coverage_summary_slides(prs, df, bid_coverage_slides_grouping):
+    """
+    Create the Bid Coverage Summary slides.
+    
+    Slide 1: 
+    - A table showing:
+        Rows grouped by each unique value in bid_coverage_slides_grouping plus an 'All Items' row.
+        For each grouping block, we have three rows:
+          1) [GroupName/All Items, # of Bids total, supplier # of bids...]
+          2) [Item Coverage %, (blank), supplier coverage %...]
+          3) [Savings (Use Current), (blank), supplier savings in millions...]
+    
+    Columns:
+      - First column: grouping name or the label for the row (like "Item Coverage %", "Savings (Use Current)")
+      - Second column: "# of Bids" or blank
+      - Remaining columns: one for each supplier
+      
+    Assumptions:
+    - 'Awarded Supplier', 'Bid ID', 'Current Price', 'Bid Price', 'Bid Volume', and the grouping column exist.
+    """
+
+    # Identify unique suppliers
+    suppliers = df['Awarded Supplier'].dropna().unique().tolist()
+    suppliers = sorted(suppliers)  # sort for consistency
+
+    # Determine unique group values
+    group_values = df[bid_coverage_slides_grouping].dropna().unique().tolist()
+    group_values = sorted(group_values)
+
+    # Add 'All Items' as a special grouping representing the entire dataset
+    # We'll handle 'All Items' first, then each group
+    all_items_label = "All Items"
+
+    # Prepare data calculations
+    # Convert Bid ID to string to ensure consistent type
+    df['Bid ID'] = df['Bid ID'].astype(str)
+
+    # Function to calculate metrics for a given subset of df
+    def calc_metrics(subset):
+        # Number of unique bids
+        total_bids = subset['Bid ID'].nunique()
+        
+        supplier_stats = {}
+        for sup in suppliers:
+            sup_data = subset[subset['Awarded Supplier'] == sup]
+            sup_bids = sup_data['Bid ID'].nunique()
+            
+            # Item coverage %
+            coverage_pct = (sup_bids / total_bids * 100) if total_bids > 0 else 0.0
+            
+            # Savings: sum((Current Price - Bid Price)*Volume)
+            sup_data = sup_data.dropna(subset=['Current Price','Bid Price','Bid Volume'])
+            savings = ((sup_data['Current Price'] - sup_data['Bid Price']) * sup_data['Bid Volume']).sum()
+            
+            supplier_stats[sup] = {
+                'bids': sup_bids,
+                'coverage_pct': coverage_pct,
+                'savings': savings
+            }
+        
+        return total_bids, supplier_stats
+
+    # Calculate for all items
+    all_total_bids, all_supplier_stats = calc_metrics(df)
+
+    # Calculate per group
+    group_results = {}
+    for g in group_values:
+        g_df = df[df[bid_coverage_slides_grouping] == g]
+        g_total_bids, g_supplier_stats = calc_metrics(g_df)
+        group_results[g] = (g_total_bids, g_supplier_stats)
+
+    # Create a new slide for the table (Slide 1)
+    slide_layout = prs.slide_layouts[1]  # assuming layout index 1 is a blank layout
+    slide = prs.slides.add_slide(slide_layout)
+
+    # Remove existing shapes if necessary
+    for shape in list(slide.shapes):
+        sp = shape.element
+        sp.getparent().remove(sp)
+
+    # Define table structure
+    # Rows: For each group including 'All Items' we have 3 rows
+    # Total rows = 3 * (number_of_groups + 1)
+    num_groups = len(group_values)
+    total_rows = 3 * (num_groups + 1)
+    # Columns: 2 (GroupName/#Bids) + number_of_suppliers
+    cols = 2 + len(suppliers)
+
+    # Position and size the table
+    left = Inches(0.5)
+    top = Inches(1.0)
+    width = Inches(12.0)
+    height = Inches(0.0)  # Height auto adjusts
+
+    table = slide.shapes.add_table(total_rows, cols, left, top, width, height).table
+
+    # Header row:
+    # First cell: The grouping column name or "Product Group"
+    # Second cell: "# of Bids"
+    # Then each supplier name
+    table.cell(0,0).text = bid_coverage_slides_grouping
+    table.cell(0,1).text = "# of Bids"
+    for i, sup in enumerate(suppliers, start=2):
+        table.cell(0,i).text = sup
+
+    # Format header
+    for c in range(cols):
+        p = table.cell(0,c).text_frame.paragraphs[0]
+        p.font.bold = True
+        p.font.size = Pt(11)
+        p.alignment = PP_ALIGN.CENTER
+
+    # Function to fill one grouping block (3 rows):
+    # row1: [GroupName, total_bids, ...supplier bids...]
+    # row2: [Item Coverage %, "", ...supplier coverage%...]
+    # row3: [Savings (Use Current), "", ...supplier savings...]
+    def fill_group_block(start_row, group_label, total_bids, supplier_stats):
+        # Row 1
+        table.cell(start_row,0).text = group_label
+        table.cell(start_row,1).text = f"{total_bids:,.0f}"
+        for i, sup in enumerate(suppliers, start=2):
+            sbids = supplier_stats[sup]['bids']
+            table.cell(start_row,i).text = f"{sbids:,.0f}"
+
+        # Row 2 (Item Coverage %)
+        table.cell(start_row+1,0).text = "Item Coverage %"
+        table.cell(start_row+1,1).text = ""
+        for i, sup in enumerate(suppliers, start=2):
+            c_pct = supplier_stats[sup]['coverage_pct']
+            table.cell(start_row+1,i).text = f"{c_pct:.0f}%"
+
+        # Row 3 (Savings (Use Current))
+        table.cell(start_row+2,0).text = "Savings (Use Current)"
+        table.cell(start_row+2,1).text = ""
+        for i, sup in enumerate(suppliers, start=2):
+            savings = supplier_stats[sup]['savings']
+            table.cell(start_row+2,i).text = format_currency_in_millions(savings)
+
+        # Formatting all cells in these three rows
+        for r in range(start_row, start_row+3):
+            for c in range(cols):
+                p = table.cell(r,c).text_frame.paragraphs[0]
+                p.font.size = Pt(10)
+                if c == 0:
+                    p.alignment = PP_ALIGN.LEFT
+                    p.font.bold = True
+                else:
+                    p.alignment = PP_ALIGN.CENTER
+
+    # Fill All Items block
+    row_index = 1  # we used 0 for header
+    fill_group_block(row_index, all_items_label, all_total_bids, all_supplier_stats)
+    row_index += 3
+
+    # Fill each group block
+    for g in group_values:
+        g_total_bids, g_supplier_stats = group_results[g]
+        fill_group_block(row_index, str(g), g_total_bids, g_supplier_stats)
+        row_index += 3
+
+    # Slide 2 and 3 placeholders (not fully specified by user)
+    # Just create blank slides
+    for _ in range(2):
+        blank_slide_layout = prs.slide_layouts[1]
+        prs.slides.add_slide(blank_slide_layout)
+
+    return prs
+
+def create_bid_coverage_summary_presentation(merged_data, bid_coverage_slides_grouping, template_file_path):
+    """
+    Creates the Bid Coverage Summary presentation.
+    This will:
+    1. Make a copy of merged_data
+    2. Create a ppt presentation with 3 slides.
+       Slide 1: Table as specified
+       Slide 2 and 3: blank placeholders
+    
+    Returns: A pptx Presentation object
+    """
+    from pptx import Presentation
+
+    # Create a copy of merged_data
+    df = merged_data.copy()
+
+    # Load template or create blank
+    if template_file_path and os.path.exists(template_file_path):
+        prs = Presentation(template_file_path)
+    else:
+        prs = Presentation()
+
+    # Create slides
+    prs = create_bid_coverage_summary_slides(prs, df, bid_coverage_slides_grouping)
+
+    return prs
+
 
 
 
@@ -2491,18 +2753,25 @@ def main():
                 with st.expander("Configure Grouping for Scenario Summary Slides"):
                     st.header("Scenario Summary Grouping")
 
-                    
-                    # Select group by field
                     grouping_options = st.session_state.merged_data.columns.tolist()
+                    # This will store the selected grouping in st.session_state["scenario_detail_grouping"]
                     st.selectbox("Group by for Scenario Detail", grouping_options, key="scenario_detail_grouping")
 
-                    on = st.toggle("Include Sub-Scenario Summaries?")
+                    # Just call st.toggle with a key. Do not assign to st.session_state again.
+                    st.toggle("Include Sub-Scenario Summaries?", key="scenario_sub_summaries_on")
 
-                    if on:
-                        # Select scenario summary fields
+                    if st.session_state["scenario_sub_summaries_on"]:
                         scenario_summary_fields = st.session_state.merged_data.columns.tolist()
-                        scenario_summary_group_selection = st.selectbox("Scenario Summaries Selections", scenario_summary_fields, key="scenario_summary_selections")
-                        st.pills("Select scenario sub-summaries", st.session_state.merged_data[scenario_summary_group_selection].unique(), selection_mode="multi", key="value_excl_ais")
+                        st.selectbox("Scenario Summaries Selections", scenario_summary_fields, key="scenario_summary_selections")
+
+                        # st.pills with a key will automatically store the selected values in st.session_state["sub_summary_selections"]
+                        st.pills(
+                            "Select scenario sub-summaries", 
+                            st.session_state.merged_data[st.session_state.scenario_summary_selections].unique(), 
+                            selection_mode="multi",
+                            key="sub_summary_selections"
+                        )
+
 
 
 
@@ -2525,6 +2794,7 @@ def main():
                     excel_output = BytesIO()
                     ppt_output = BytesIO()
                     ppt_data = None
+                    prs = None
                     with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
                         baseline_data = st.session_state.baseline_data
                         original_merged_data = st.session_state.original_merged_data
@@ -3233,7 +3503,7 @@ def main():
 
 
                     # Generate PowerPoint File if presentations are selected
-                    if selected_presentations:
+                    if "Scenario Summary" in selected_presentations:
                         try:
                             # Construct the template file path
                             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -3252,67 +3522,72 @@ def main():
 
                             # Retrieve the grouping field selected by the user
                             scenario_detail_grouping = st.session_state.get('scenario_detail_grouping', None)
-                            if scenario_detail_grouping is None:
-                                st.error("Please select a grouping field for the scenario detail slides.")
-                                ppt_data = None  # Ensure ppt_data is set to None if generation fails
-                            else:
-                                # Get list of sheet names starting with '#'
-                                scenario_sheet_names = [sheet_name for sheet_name in excel_file.sheet_names if sheet_name.startswith('#')]
+                            scenario_sub_summaries_on = st.session_state.get("scenario_sub_summaries_on", False)
+                            scenario_summary_selections = st.session_state.get("scenario_summary_selections", None)
+                            sub_summaries_list = st.session_state.get("sub_summary_selections", [])
 
-                                scenario_dataframes = {}
-                                for sheet_name in scenario_sheet_names:
-                                    df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                            # Get list of sheet names starting with '#'
+                            scenario_sheet_names = [sheet_name for sheet_name in excel_file.sheet_names if sheet_name.startswith('#')]
 
-                                    # Ensure 'Bid ID' exists in df
-                                    if 'Bid ID' not in df.columns:
-                                        st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'. Skipping this sheet.")
-                                        continue  # Skip this scenario
+                            scenario_dataframes = {}
+                            for sheet_name in scenario_sheet_names:
+                                df = pd.read_excel(excel_file, sheet_name=sheet_name)
 
-                                    # Check if the grouping column exists in df
-                                    if scenario_detail_grouping not in df.columns:
-                                        # Attempt to merge the grouping column into df based on 'Bid ID' from original_df
+                                # Ensure 'Bid ID' exists in df
+                                if 'Bid ID' not in df.columns:
+                                    st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'. Skipping this sheet.")
+                                    continue  # Skip this scenario
+
+                                # Merge scenario_detail_grouping if required
+                                if scenario_detail_grouping and scenario_detail_grouping not in df.columns:
+                                    # Attempt to merge from original_df
+                                    if original_df is not None and 'Bid ID' in original_df.columns:
+                                        if scenario_detail_grouping in original_df.columns:
+                                            df['Bid ID'] = df['Bid ID'].astype(str)
+                                            original_df['Bid ID'] = original_df['Bid ID'].astype(str)
+                                            df = df.merge(original_df[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
+                                            if scenario_detail_grouping not in df.columns:
+                                                st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into '{sheet_name}'. Skipping this scenario.")
+                                                continue
+                                        else:
+                                            st.warning(f"The selected grouping field '{scenario_detail_grouping}' is not in 'original_merged_data'. No detail slides will be created for '{sheet_name}'.")
+                                            # It's okay to proceed without details if user still wants scenario summary slides
+                                    else:
+                                        st.warning("The 'original_merged_data' is not available or 'Bid ID' missing in 'original_merged_data'. Cannot merge grouping.")
+                                        # We can still proceed without scenario details
+
+                                # Merge scenario_summary_selections if sub-summaries are on and the column not present
+                                if scenario_sub_summaries_on and scenario_summary_selections:
+                                    if scenario_summary_selections not in df.columns:
+                                        # Attempt to merge from original_df
                                         if original_df is not None and 'Bid ID' in original_df.columns:
-                                            if scenario_detail_grouping in original_df.columns:
-                                                # Convert 'Bid ID' columns to string to ensure they have the same data type
+                                            if scenario_summary_selections in original_df.columns:
                                                 df['Bid ID'] = df['Bid ID'].astype(str)
                                                 original_df['Bid ID'] = original_df['Bid ID'].astype(str)
-                                                # Merge the grouping column into df based on 'Bid ID'
-                                                df = df.merge(
-                                                    original_df[['Bid ID', scenario_detail_grouping]],
-                                                    on='Bid ID',
-                                                    how='left'
-                                                )
-                                                if scenario_detail_grouping not in df.columns:
-                                                    st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into the scenario data for '{sheet_name}'. Skipping this sheet.")
-                                                    continue  # Skip this scenario
+                                                df = df.merge(original_df[['Bid ID', scenario_summary_selections]], on='Bid ID', how='left')
+                                                if scenario_summary_selections not in df.columns:
+                                                    st.warning(f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. Sub-summaries may not be created.")
                                             else:
-                                                st.error(f"The selected grouping field '{scenario_detail_grouping}' is not present in 'original_merged_data'. Skipping '{sheet_name}'.")
-                                                continue  # Skip this scenario
+                                                st.warning(f"The sub-summary field '{scenario_summary_selections}' is not in 'original_merged_data'. No sub-summaries for '{sheet_name}'.")
                                         else:
-                                            st.error("The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'. Skipping merge.")
-                                            continue  # Skip this scenario
-                                    else:
-                                        # Grouping column already exists in df; proceed without merging
-                                        pass
+                                            st.warning("The 'original_merged_data' is not available or 'Bid ID' missing for merging sub-summary selections.")
 
+                                scenario_dataframes[sheet_name] = df
 
-                                    # Add the DataFrame to the scenario_dataframes dictionary
-                                    scenario_dataframes[sheet_name] = df
+                            if not scenario_dataframes:
+                                st.error("No valid scenario dataframes were created. Please check your data.")
+                                ppt_data = None  # Ensure ppt_data is set to None if generation fails
+                            else:
+                                # Generate the presentation (this now includes sub-summaries if toggled on)
+                                prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
 
-                                if not scenario_dataframes:
-                                    st.error("No valid scenario dataframes were created. Please check your data.")
+                                if not prs:
+                                    st.error("Failed to generate Scenario Summary presentation.")
                                     ppt_data = None  # Ensure ppt_data is set to None if generation fails
                                 else:
-                                    # Generate the presentation
-                                    prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
-
-                                    if not prs:
-                                        st.error("Failed to generate Scenario Summary presentation.")
-                                        ppt_data = None  # Ensure ppt_data is set to None if generation fails
-                                    else:
-                                        # Save the presentation to BytesIO
-                                        prs.save(ppt_output)
-                                        ppt_data = ppt_output.getvalue()
+                                    # Save the presentation to BytesIO
+                                    prs.save(ppt_output)
+                                    ppt_data = ppt_output.getvalue()
                         except Exception as e:
                             st.error(f"An error occurred while generating the presentation: {e}")
                             logger.error(f"Error generating presentation: {e}")
@@ -3320,11 +3595,40 @@ def main():
                     else:
                         ppt_data = None  # No presentations selected
 
+
+
+
+                    # Bid Coverage Summary Presentation
+                    if "Bid Coverage Summary" in selected_presentations:
+                        try:
+                            bid_coverage_slides_grouping = st.session_state.get('bid_coverage_slides_grouping', None)
+                            if not bid_coverage_slides_grouping:
+                                st.error("Please select a grouping field for the Bid Coverage slides.")
+                            else:
+                                bc_df = st.session_state.merged_data.copy()
+
+                                # If prs is None (no scenario summary ran), create a new presentation
+                                if prs is None:
+                                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                                    template_file_path = os.path.join(script_dir, 'Slide template.pptx')
+                                    prs = Presentation(template_file_path)
+
+                                # Add Bid Coverage Summary slides to prs
+                                prs = create_bid_coverage_summary_slides(prs, bc_df, bid_coverage_slides_grouping)
+
+                                # Re-save presentation with new slides
+                                ppt_output = BytesIO()
+                                prs.save(ppt_output)
+                                ppt_output.seek(0)
+                                ppt_data = ppt_output.getvalue()
+
+                        except Exception as e:
+                            st.error(f"An error occurred while generating the Bid Coverage Summary presentation: {e}")
+                            logger.error(f"Error generating Bid Coverage Summary presentation: {e}")
+
                     # Store files in session state
                     st.session_state.excel_data = excel_data
                     st.session_state.ppt_data = ppt_data
-
-
 
                     # Display download buttons
                     st.success("Analysis completed successfully. Please download your files below.")
@@ -3347,7 +3651,6 @@ def main():
                             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                         )
                         logger.info("Presentation prepared for download.")
-
 
 
 
