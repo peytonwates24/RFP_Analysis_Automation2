@@ -1418,20 +1418,34 @@ def main():
 
 
 
-                        # --- Supplier Comparison Summary Presentation ---
+                            # --- Supplier Comparison Summary Presentation ---
                         if "Supplier Comparison Summary" in selected_presentations:
                             try:
-                                # Does not require Excel if not using scenario data:
-                                if prs is None:
-                                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                                    template_file_path = os.path.join(script_dir, 'Slide template.pptx')
-                                    prs = Presentation(template_file_path)
-
-                                prs = create_supplier_comparison_summary_slide(prs)
-                                ppt_output = BytesIO()
-                                prs.save(ppt_output)
-                                ppt_output.seek(0)
-                                ppt_data = ppt_output.getvalue()
+                                supplier_comparison_summary_grouping = st.session_state.get('supplier_comparison_summary_grouping', None)
+                                if not supplier_comparison_summary_grouping:
+                                    st.error("Please select a grouping field for the Supplier Comparison Summary.")
+                                else:
+                                    # Make a copy of merged_data for supplier comparison summary
+                                    if 'merged_data' not in st.session_state:
+                                        st.error("No merged data available for Supplier Comparison Summary.")
+                                    else:
+                                        sc_df = st.session_state.merged_data.copy()
+                        
+                                        # If no existing presentation (prs) has been created yet, create one
+                                        if prs is None:
+                                            script_dir = os.path.dirname(os.path.abspath(__file__))
+                                            template_file_path = os.path.join(script_dir, 'Slide template.pptx')
+                                            prs = Presentation(template_file_path)
+                        
+                                        # Add the Supplier Comparison Summary slide
+                                        prs = create_supplier_comparison_summary_slide(prs, sc_df, supplier_comparison_summary_grouping)
+                        
+                                        # Re-save presentation with new slides
+                                        ppt_output = BytesIO()
+                                        prs.save(ppt_output)
+                                        ppt_output.seek(0)
+                                        ppt_data = ppt_output.getvalue()
+                        
                             except Exception as e:
                                 st.error(f"An error occurred while generating the Supplier Comparison Summary presentation: {e}")
                                 logger.error(f"Error generating Supplier Comparison Summary presentation: {e}")

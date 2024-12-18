@@ -1572,19 +1572,18 @@ def create_bid_coverage_summary_presentation(merged_data, bid_coverage_slides_gr
 
 
 # /// Suppplier Comparison Helper Functions
-def create_supplier_comparison_summary_slide(prs):
+def create_supplier_comparison_summary_slide(prs, df, grouping):
     """
     Create a slide for the Supplier Comparison Summary.
-
-    Args:
-    - prs: PowerPoint presentation object
+    This shows a clustered column chart of percentage difference from *current price* as baseline by grouping.
+    The difference is computed using Bid Price relative to Current Price.
     """
 
-    # Add a new slide to the presentation
-    slide_layout = prs.slide_layouts[5]  # Blank slide layout
+    # Add a new slide (blank layout)
+    slide_layout = prs.slide_layouts[1]  # Blank slide layout
     slide = prs.slides.add_slide(slide_layout)
 
-    # Add title to the top-left corner of the slide
+    # Title
     title_left = Inches(0.5)
     title_top = Inches(0.2)
     title_width = Inches(9)
@@ -1596,70 +1595,276 @@ def create_supplier_comparison_summary_slide(prs):
     title_frame.paragraphs[0].font.size = Pt(24)
     title_frame.paragraphs[0].font.bold = True
 
-    # Add blank clustered bar chart in the upper left quadrant
-    chart_left = Inches(0.5)
+    # Ensure grouping column exists
+    if grouping not in df.columns:
+        return prs
+
+    # Retrieve required mappings from session state
+    bid_id_col = st.session_state.column_mapping.get('Bid ID')
+    incumbent_col = st.session_state.column_mapping.get('Incumbent')
+    supplier_name_col = st.session_state.column_mapping.get('Supplier Name')
+    baseline_price_col = st.session_state.column_mapping.get('Baseline Price')  # Still defined, but we'll not use as baseline now
+    current_price_col = st.session_state.column_mapping.get('Current Price')    # Using this as our baseline reference
+    bid_price_col = st.session_state.column_mapping.get('Bid Price')            # Bid Price used for difference calculation
+    bid_volume_col = st.session_state.column_mapping.get('Bid Volume')
+
+    groups = df[grouping].dropna().unique()
+    groups = sorted(groups)
+    suppliers = df[supplier_name_col].dropna().unique()
+    suppliers = sorted(suppliers)
+
+    # Calculate percentage difference from the current price baseline using Bid Price
+    def pct_diff_func(x):
+        total_vol = x[bid_volume_col].sum()
+        if total_vol == 0:
+            return 0
+        avg_current = (x[current_price_col]*x[bid_volume_col]).sum()/total_vol
+        avg_bid = (x[bid_price_col]*x[bid_volume_col]).sum()/total_vol
+        if avg_current == 0:
+            return 0
+        # Return fraction (e.g. 0.1 = 10%)
+        return (avg_bid - avg_current)/avg_current
+
+    grouped = df.groupby([grouping, supplier_name_col])
+    summary = grouped.apply(pct_diff_func).reset_index(name='pct_diff')
+
+    pivot = summary.pivot(index=grouping, columns=supplier_name_col, values='pct_diff').fillna(0)
+    pivot = pivot.reindex(index=groups, columns=suppliers, fill_value=0)
+
+    # Chart location and size
+    chart_left = Inches(0)
     chart_top = Inches(1)
-    chart_width = Inches(4.5)
+    chart_width = Inches(8.3)
     chart_height = Inches(3)
 
-    # Create dummy data for the chart (minimal setup)
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_DATA_LABEL_POSITION
+    from pptx.enum.text import PP_ALIGN
+    from pptx.dml.color import MSO_THEME_COLOR
+
     chart_data = CategoryChartData()
-    chart_data.categories = ["Category 1", "Category 2", "Category 3"]
-    chart_data.add_series("Series 1", (0, 0, 0))  # All zero values to simulate a blank chart
+    chart_data.categories = list(pivot.index)
+    for supplier in pivot.columns:
+        chart_data.add_series(supplier, pivot[supplier].tolist())
 
-    slide.shapes.add_chart(
-        XL_CHART_TYPE.BAR_CLUSTERED, chart_left, chart_top, chart_width, chart_height, chart_data
-    )
+    chart_shape = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, chart_left, chart_top, chart_width, chart_height, chart_data)
+    chart = chart_shape.chart
 
-    # Add SmartArt-style bullet points in the upper right quadrant
-    text_box_left = Inches(5.5)
+    # Chart formatting
+    chart.has_title = True
+    chart.chart_title.text_frame.text = f"Percentage from Current by {grouping}"
+    title_p = chart.chart_title.text_frame.paragraphs[0]
+    title_p.font.size = Pt(8)
+    title_p.font.name = "Calibri"
+    title_p.font.bold = True
+
+    category_axis = chart.category_axis
+    category_axis.has_title = True
+    category_axis.axis_title.text_frame.text = grouping
+    cat_p = category_axis.axis_title.text_frame.paragraphs[0]
+    cat_p.font.size = Pt(8)
+    cat_p.font.name = "Calibri"
+    cat_p.font.bold = True
+    category_axis.tick_labels.font.size = Pt(8)
+    category_axis.tick_labels.font.name = "Calibri"
+
+    value_axis = chart.value_axis
+    value_axis.has_title = True
+    value_axis.axis_title.text_frame.text = "% Difference from Current"
+    val_p = value_axis.axis_title.text_frame.paragraphs[0]
+    val_p.font.size = Pt(8)
+    val_p.font.name = "Calibri"
+    val_p.font.bold = True
+
+    value_axis.minimum_scale = -0.5
+    value_axis.maximum_scale = 0.5
+    value_axis.major_unit = 0.1
+    value_axis.tick_labels.number_format = '0%'
+    value_axis.tick_labels.font.size = Pt(8)
+    value_axis.tick_labels.font.name = "Calibri"
+
+    chart.has_legend = True
+    if chart.has_legend and chart.legend:
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        chart.legend.include_in_layout = False
+        legend_font = chart.legend.font
+        legend_font.size = Pt(8)
+        legend_font.name = "Calibri"
+        legend_font.bold = True
+
+    theme_colors = [MSO_THEME_COLOR.ACCENT_1, MSO_THEME_COLOR.ACCENT_4, MSO_THEME_COLOR.ACCENT_5, MSO_THEME_COLOR.ACCENT_6]
+    for i, series in enumerate(chart.series):
+        color = theme_colors[i % len(theme_colors)]
+        series.format.fill.solid()
+        series.format.fill.fore_color.theme_color = color
+        series.invert_if_negative = False
+        series.has_data_labels = False
+        dl = series.data_labels
+        dl.show_value = True
+        dl.show_series_name = False
+        dl.number_format = '0%'
+        dl.font.size = Pt(8)
+        dl.font.name = "Calibri"
+        dl.position = XL_DATA_LABEL_POSITION.OUTSIDE_END
+
+    # Bullet points in upper right quadrant
+    text_box_left = Inches(8.3)
     text_box_top = Inches(1)
     text_box_width = Inches(4)
-    text_box_height = Inches(3)
+    text_box_height = Inches(2.83)
     text_box = slide.shapes.add_textbox(text_box_left, text_box_top, text_box_width, text_box_height)
     text_frame = text_box.text_frame
     text_frame.word_wrap = True
 
-    # Header 1: "Average % from Current by Supplier"
     p1 = text_frame.add_paragraph()
     p1.text = "Average % from Current by Supplier"
     p1.font.bold = True
-
-    # Bullet points for Header 1
     for _ in range(3):
         bullet = text_frame.add_paragraph()
         bullet.text = "Fill in comments here"
         bullet.level = 1
 
-    # Add spacing between the two sections
     spacer = text_frame.add_paragraph()
     spacer.text = ""
 
-    # Header 2: "Average % from Current by Grouping"
     p2 = text_frame.add_paragraph()
     p2.text = "Average % from Current by Grouping"
     p2.font.bold = True
-
-    # Bullet points for Header 2
     for _ in range(3):
         bullet = text_frame.add_paragraph()
         bullet.text = "Fill in comments here"
         bullet.level = 1
 
-    # Add blank 4x4 data table in the bottom left quadrant
-    table1_left = Inches(0.5)
-    table1_top = Inches(4.5)
-    table1_width = Inches(4.5)
-    table1_height = Inches(2)
-    table1_rows, table1_cols = 4, 4
-    slide.shapes.add_table(table1_rows, table1_cols, table1_left, table1_top, table1_width, table1_height)
+    # Main table (suppliers vs groups) at bottom-left quadrant
+    table_data = pivot.T  # suppliers as rows, groups as columns
+    rows = len(table_data.index) + 1
+    cols = len(table_data.columns) + 1
+    table_left = Inches(0.5)
+    table_top = Inches(4.5)
+    table_width = Inches(4.5)
+    table_height = Inches(2)
+    graphic_frame = slide.shapes.add_table(rows, cols, table_left, table_top, table_width, table_height)
+    table = graphic_frame.table
 
-    # Add blank 8x2 data table in the bottom right quadrant
-    table2_left = Inches(5.5)
-    table2_top = Inches(4.5)
-    table2_width = Inches(4)
-    table2_height = Inches(2)
-    table2_rows, table2_cols = 8, 2
-    slide.shapes.add_table(table2_rows, table2_cols, table2_left, table2_top, table2_width, table2_height)
+    table.cell(0,0).text = ""
+    for j, grp in enumerate(table_data.columns, start=1):
+        cell = table.cell(0,j)
+        cell.text = str(grp)
+        p = cell.text_frame.paragraphs[0]
+        p.font.bold = True
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
+
+    for i, sup in enumerate(table_data.index, start=1):
+        cell = table.cell(i,0)
+        cell.text = str(sup)
+        p = cell.text_frame.paragraphs[0]
+        p.font.bold = True
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
+
+    for i, sup in enumerate(table_data.index, start=1):
+        for j, grp in enumerate(table_data.columns, start=1):
+            val = table_data.loc[sup, grp]
+            cell = table.cell(i,j)
+            cell.text = f"{val*100:.1f}%"
+            p = cell.text_frame.paragraphs[0]
+            p.font.size = Pt(8)
+            p.font.name = "Calibri"
+
+    # Average % from Current by Supplier table (top right)
+    avg_by_supplier = pivot.mean(axis=0)  # fraction
+    sup_rows = len(avg_by_supplier.index) + 2  # 1 title row + 1 header row + data rows
+    sup_cols = 2
+    sup_table_left = Inches(9.59)
+    sup_table_top = Inches(4.49)  # just below bullet box (~4.0)
+    sup_table_width = Inches(3)
+    sup_table_height = Inches(2.33)
+    sup_gf = slide.shapes.add_table(sup_rows, sup_cols, sup_table_left, sup_table_top, sup_table_width, sup_table_height)
+    sup_table_obj = sup_gf.table
+
+    # Title row for supplier table
+    sup_table_obj.cell(0,0).merge(sup_table_obj.cell(0,1))
+    sup_table_obj.cell(0,0).text = "Average % from Current by Supplier"
+    p = sup_table_obj.cell(0,0).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+    p.alignment = PP_ALIGN.CENTER
+
+    # Header row
+    sup_table_obj.cell(1,0).text = "Supplier"
+    p = sup_table_obj.cell(1,0).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+
+    sup_table_obj.cell(1,1).text = "Avg %"
+    p = sup_table_obj.cell(1,1).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+
+    for i, sup in enumerate(avg_by_supplier.index, start=2):
+        cell = sup_table_obj.cell(i,0)
+        cell.text = sup
+        p = cell.text_frame.paragraphs[0]
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
+
+        val = avg_by_supplier[sup]
+        cell = sup_table_obj.cell(i,1)
+        cell.text = f"{val*100:.1f}%"
+        p = cell.text_frame.paragraphs[0]
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
+
+    # Average % from Current by Grouping table (bottom right)
+    avg_by_group = pivot.mean(axis=1)
+    grp_rows = len(avg_by_group.index) + 2
+    grp_cols = 2
+    grp_table_left = Inches(5.83)
+    grp_table_top = Inches(4.5)
+    grp_table_width = Inches(3)
+    grp_table_height = Inches(1.4)
+    grp_gf = slide.shapes.add_table(grp_rows, grp_cols, grp_table_left, grp_table_top, grp_table_width, grp_table_height)
+    grp_table_obj = grp_gf.table
+
+    # Title row for grouping table
+    grp_table_obj.cell(0,0).merge(grp_table_obj.cell(0,1))
+    grp_table_obj.cell(0,0).text = "Average % from Current by Grouping"
+    p = grp_table_obj.cell(0,0).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+    p.alignment = PP_ALIGN.CENTER
+
+    # Header row
+    grp_table_obj.cell(1,0).text = "Grouping"
+    p = grp_table_obj.cell(1,0).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+
+    grp_table_obj.cell(1,1).text = "Avg %"
+    p = grp_table_obj.cell(1,1).text_frame.paragraphs[0]
+    p.font.bold = True
+    p.font.size = Pt(8)
+    p.font.name = "Calibri"
+
+    for i, grp_val in enumerate(avg_by_group.index, start=2):
+        cell = grp_table_obj.cell(i,0)
+        cell.text = str(grp_val)
+        p = cell.text_frame.paragraphs[0]
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
+
+        val = avg_by_group[grp_val]
+        cell = grp_table_obj.cell(i,1)
+        cell.text = f"{val*100:.1f}%"
+        p = cell.text_frame.paragraphs[0]
+        p.font.size = Pt(8)
+        p.font.name = "Calibri"
 
     return prs
+
