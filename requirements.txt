@@ -1,5 +1,5 @@
 streamlit==1.39
-pandas==1.5.3
+pandas==2.2.3
 PyYAML==6.0
 bcrypt==4.0.1
 openpyxl==3.0.10
