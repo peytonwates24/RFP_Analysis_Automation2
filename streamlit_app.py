@@ -136,8 +136,8 @@ def main():
         navigate_to('upload')
     if st.sidebar.button('My Projects'):
         navigate_to('analysis')
-    if st.sidebar.button('Settings'):
-        navigate_to('settings')
+    if st.sidebar.button('Dashboards'):
+        navigate_to('dashboards')
     if st.sidebar.button('About'):
         navigate_to('about')
 
@@ -1611,13 +1611,83 @@ def main():
             st.error("No project selected.")
             logger.error("No project selected.")
 
-    elif section == 'settings':
-        st.title('Settings')
+    elif section == 'dashboards':
+        st.title('Dashboards')
         st.write("This section is under construction.")
 
     elif section == 'about':
-        st.title('About')
-        st.write("This section is under construction.")
+        st.title("About")
+
+        # Step 1: Read the entire markdown file
+        with open("docs/report_documentation.md", "r", encoding="utf-8") as f:
+            doc_text = f.read()
+
+
+        # Step 2: Identify a consistent pattern in your markdown headings.
+        # For example, if each report section starts with "##" followed by the report name,
+        # we can split on that pattern or use a more robust parsing approach.
+        #
+        # In this example, let's assume your markdown is structured with distinct 
+        # second-level headings (##) for each report type, like:
+        #
+        # ## "As-Is" Report
+        # (content...)
+        #
+        # ## "As-Is + Exclusions" Report
+        # (content...)
+        #
+        # and so forth.
+        
+        # Split the text by '## ' to separate each section
+        sections = doc_text.split('## ')
+        # The first split might be text before the first "##", so we can ignore it if empty
+        sections = [sec.strip() for sec in sections if sec.strip()]
+
+        # Each element in 'sections' should now start with something like:
+        # '"As-Is" Report\n\n**What it does:** ...'
+        # We can map each section to a title and content by splitting on the first newline.
+        report_dict = {}
+        for sec in sections:
+            # Split on the first newline to separate the title line from the content
+            lines = sec.split('\n', 1)
+            title_line = lines[0].strip()
+            content = lines[1].strip() if len(lines) > 1 else ""
+            report_dict[title_line] = content
+
+        # Step 3: Create tabs. The keys in report_dict should match your reports.
+        # Extract just the titles you're interested in, ensuring they match your markdown headings.
+        report_titles = [
+            'As-Is',
+            'As-Is + Exclusions',
+            'Best of Best',
+            'Best of Best + Exclusions',
+            'Customizable Analysis',
+            'Bid Coverage Report'
+        ]
+        
+        st.markdown(
+            """
+            <style>
+            /* Allow the tabs container to scroll horizontally */
+            div[data-baseweb="tab-list"] {
+            overflow-x: auto;
+            white-space: nowrap;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+        tab_objects = st.tabs(report_titles)
+
+        # Step 4: Display each report’s content in the corresponding tab dynamically
+        for tab, title in zip(tab_objects, report_titles):
+            with tab:
+                # Safely access the dictionary (if there's a mismatch, provide a fallback)
+                content = report_dict.get(title, "*Content not found.*")
+                # Write the content as markdown
+                st.markdown("## " + title)
+                st.markdown(content)
 
     else:
         st.title('Home')
