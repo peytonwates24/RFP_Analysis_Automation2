@@ -16,6 +16,17 @@ from openpyxl.styles import Font
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string
 from pptx import Presentation
+from supabase import create_client, Client  # New import
+
+# Initialize Supabase connection.
+#@st.cache_resource
+#def init_supabase_connection():
+    #url = st.secrets["SUPABASE_URL"]
+    #key = st.secrets["SUPABASE_KEY"]
+   # return create_client(url, key)
+
+#supabase = init_supabase_connection()
+
 
 def apply_custom_css():
     """Apply custom CSS for styling the app."""
@@ -414,30 +425,71 @@ def main():
             selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
 
 
-
             # Exclusion rules for Best of Best Excluding Suppliers
             if "Best of Best Excluding Suppliers" in analyses_to_run:
                 with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
                     st.header("Exclusion Rules for Best of Best Excluding Suppliers")
 
-                    supplier_name = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_bob")
-                    field = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_bob")
-                    logic = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_bob")
-                    value = st.selectbox("Select Value", st.session_state.merged_data[field].unique(), key="value_excl_bob")
+                    # Select Supplier to Exclude
+                    supplier_name = st.selectbox(
+                        "Select Supplier to Exclude",
+                        st.session_state.merged_data['Awarded Supplier'].dropna().unique(),
+                        key="supplier_name_excl_bob"
+                    )
+
+                    # Select Field for Rule
+                    field = st.selectbox(
+                        "Select Field for Rule",
+                        st.session_state.merged_data.columns.drop('Awarded Supplier'),  # Exclude 'Awarded Supplier' if necessary
+                        key="field_excl_bob"
+                    )
+
+                    # Select Logic
+                    logic = st.selectbox(
+                        "Select Logic (Equal to or Not equal to)",
+                        ["Equal to", "Not equal to"],
+                        key="logic_excl_bob"
+                    )
+
+                    # Select Value based on chosen field
+                    unique_values = st.session_state.merged_data[field].dropna().unique()
+
+                    if unique_values.size > 0:
+                        value = st.selectbox(
+                            "Select Value",
+                            unique_values,
+                            key="value_excl_bob"
+                        )
+                    else:
+                        value = st.selectbox(
+                            "Select Value",
+                            options=[0],  # You can change 0 to any default value you prefer
+                            index=0,
+                            key="value_excl_bob"
+                        )
+
+
+                    # Checkbox to exclude all Bid IDs from the supplier
                     exclude_all = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_bob")
 
+                    # Button to add exclusion rule
                     if st.button("Add Exclusion Rule", key="add_excl_bob"):
                         if 'exclusions_bob' not in st.session_state:
                             st.session_state.exclusions_bob = []
+                        # Append the exclusion rule as a tuple
                         st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
                         logger.debug(f"Added exclusion rule for BOB Excl Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
+                        st.success("Exclusion rule added successfully!")
 
+                    # Button to clear all exclusion rules
                     if st.button("Clear Exclusion Rules", key="clear_excl_bob"):
                         st.session_state.exclusions_bob = []
                         logger.debug("Cleared all exclusion rules for BOB Excl Suppliers.")
+                        st.success("All exclusion rules cleared.")
 
+                    # Display current exclusion rules
                     if 'exclusions_bob' in st.session_state and st.session_state.exclusions_bob:
-                        st.write("Current Exclusion Rules for Best of Best Excluding Suppliers:")
+                        st.write("**Current Exclusion Rules for Best of Best Excluding Suppliers:**")
                         for i, excl in enumerate(st.session_state.exclusions_bob):
                             st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
 
@@ -616,20 +668,43 @@ def main():
 
                                 # --- Best of Best Excluding Suppliers Analysis ---
                                 if "Best of Best Excluding Suppliers" in analyses_to_run:
+                                    # Retrieve exclusion rules from session state, or use an empty list
                                     exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
-                                    best_of_best_excl_df = best_of_best_excluding_suppliers(
-                                        st.session_state.merged_data, 
-                                        st.session_state.column_mapping, 
-                                        exclusions_list_bob
-                                    )
-                                    best_of_best_excl_df = add_missing_bid_ids(
-                                        best_of_best_excl_df, 
-                                        original_merged_data, 
-                                        st.session_state.column_mapping, 
-                                        'BOB Excl Suppliers'
-                                    )
-                                    best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
-                                    logger.info("Best of Best Excluding Suppliers analysis completed.")
+                                    
+                                    # Ensure column names are stripped of leading/trailing spaces
+                                    st.session_state.merged_data.columns = st.session_state.merged_data.columns.str.strip()
+                                    
+                                    # Call the updated best_of_best_excluding_suppliers function with column_mapping
+                                    try:
+                                        best_of_best_excl_df = best_of_best_excluding_suppliers(
+                                            data=st.session_state.merged_data, 
+                                            column_mapping=st.session_state.column_mapping, 
+                                            excluded_conditions=exclusions_list_bob
+                                        )
+                                    except ValueError as ve:
+                                        st.error(f"Error in Best of Best Excluding Suppliers Analysis: {ve}")
+                                        logger.error(f"Best of Best Excluding Suppliers Analysis failed: {ve}")
+                                    else:
+                                        # Call add_missing_bid_ids with column_mapping
+                                        try:
+                                            best_of_best_excl_df = add_missing_bid_ids(
+                                                best_of_best_excl_df, 
+                                                original_merged_data, 
+                                                st.session_state.column_mapping, 
+                                                'BOB Excl Suppliers'
+                                            )
+                                        except Exception as e:
+                                            st.error(f"Error in adding missing Bid IDs: {e}")
+                                            logger.error(f"Adding Missing Bid IDs failed: {e}")
+                                        else:
+                                            # Export the result to Excel
+                                            try:
+                                                best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
+                                                logger.info("Best of Best Excluding Suppliers analysis completed successfully.")
+                                                st.success("Best of Best Excluding Suppliers analysis completed and exported to Excel.")
+                                            except Exception as e:
+                                                st.error(f"Error exporting Best of Best Excluding Suppliers Analysis to Excel: {e}")
+                                                logger.error(f"Exporting to Excel failed: {e}")
 
                                 # --- As-Is Excluding Suppliers Analysis ---
                                 if "As-Is Excluding Suppliers" in analyses_to_run:
@@ -1613,7 +1688,52 @@ def main():
 
     elif section == 'dashboards':
         st.title('Dashboards')
-        st.write("This section is under construction.")
+ #        # Insert file info into Supabase
+# #        if uploaded_file is not None:
+#             file_name = uploaded_file.name
+#             file_size = len(uploaded_file.getvalue())  # size in bytes
+
+#             try:
+#                 # Optionally, upload to Supabase Storage
+#                 upload_response = supabase.storage.from_("uploads").upload(file_name, uploaded_file.read())
+#                 if upload_response.status_code == 200:
+#                     st.success(f"File '{file_name}' uploaded to storage!")
+#                     logger.info(f"File '{file_name}' uploaded to Supabase Storage.")
+
+#                     # Insert metadata into 'uploaded_files' table
+#                     db_response = supabase.table("uploaded_files").insert({
+#                         "filename": file_name,
+#                         "file_size": file_size
+#                     }).execute()
+
+#                     if db_response.status_code == 201:
+#                         st.success(f"File '{file_name}' recorded in the database!")
+#                         logger.info(f"File '{file_name}' recorded in Supabase database.")
+#                     else:
+#                         st.error(f"Failed to record '{file_name}' in the database. Status Code: {db_response.status_code}")
+#                         logger.error(f"Failed to record '{file_name}' in Supabase database. Status Code: {db_response.status_code}")
+#                 else:
+#                     st.error(f"Failed to upload '{file_name}' to storage. Status Code: {upload_response.status_code}")
+#                     logger.error(f"Failed to upload '{file_name}' to Supabase Storage. Status Code: {upload_response.status_code}")
+#             except Exception as e:
+#                 st.error(f"An error occurred while uploading the file: {e}")
+#                 logger.error(f"Error uploading file '{file_name}' to Supabase: {e}")
+
+#         # Fetch previously uploaded files
+#         try:
+#             response = supabase.table("uploaded_files").select("*").order("id", ascending=False).execute()
+#             rows = response.data
+#             if rows:
+#                 for row in rows:
+#                     # Generate a signed URL for file download
+#                     signed_url = supabase.storage.from_("uploads").create_signed_url(row['filename'], 3600).data['signedURL']
+#                     st.write(f"**Filename:** {row['filename']} | [Download]({signed_url}) | **Size:** {row['file_size']} bytes | **Uploaded:** {row['upload_time']}")
+#             else:
+#                 st.write("No files uploaded yet.")
+#         except Exception as e:
+#             st.error(f"Failed to fetch uploaded files: {e}")
+#             logger.error(f"Error fetching uploaded files from Supabase: {e}")
+
 
     elif section == 'about':
         st.title("About")
