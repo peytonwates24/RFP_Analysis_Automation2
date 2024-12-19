@@ -1,6 +1,5 @@
-# Reports Overview
-
-This web-app is designed to help you provide a holistic RFP analysis through the many reports provided. Each report uses your input data—such as bids, volumes, prices, and supplier capacities—to produce insightful excel-based & Powerpoint summaries. Whether you are looking to understand your incumbent's bids (**"As-Is"**), evaluate optimal outcomes with new suppliers (**"Best of Best"**), apply custom filters and exclusions, or prepare for an upcoming presentation to share your RFPs results, these reports supports provide automated soltutions.
+## Reports Overview
+- This web-app is designed to help you provide a holistic RFP analysis through the many reports provided. Each report uses your input data—such as bids, volumes, prices, and supplier capacities—to produce insightful excel-based & Powerpoint summaries. Whether you are looking to understand your incumbent's bids (**"As-Is"**), evaluate optimal outcomes with new suppliers (**"Best of Best"**), apply custom filters and exclusions, or prepare for an upcoming presentation to share your RFPs results, these reports supports provide automated soltutions.
 
 ---
 
