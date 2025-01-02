@@ -1,40 +1,76 @@
 import pandas as pd
 from .config import logger
+import numpy as np
 
 # Scenario Analysis
 
+import numpy as np  # Ensure this import is present to handle np.nan
+import pandas as pd  # Make sure you have imported pandas as well
+
 def add_missing_bid_ids(best_of_best_excl_df, original_merged_data, column_mapping, sheet_name):
     """
-    Add missing Bid IDs to the analysis results.
+    Add missing Bid IDs to the analysis results by creating 'Unallocated' rows.
 
+    This version uses pd.concat instead of the deprecated DataFrame.append().
+    
     Parameters:
         best_of_best_excl_df (pd.DataFrame): The current analysis DataFrame.
         original_merged_data (pd.DataFrame): The original merged DataFrame before exclusions.
         column_mapping (dict): A mapping of standard column names to actual DataFrame column names.
-        sheet_name (str): The name of the sheet for logging or further processing.
-
+        sheet_name (str): The name of the sheet (for logging or further processing).
+    
     Returns:
         pd.DataFrame: Updated analysis DataFrame with missing Bid IDs handled.
     """
-    # Extract Bid ID column name from column_mapping
+
+    # Extract mapped column names
     bid_id_col = column_mapping['Bid ID']
-    
-    # Identify missing Bid IDs
-    missing_bid_ids = original_merged_data[bid_id_col].unique()
-    processed_bid_ids = best_of_best_excl_df[bid_id_col].unique()
-    bids_to_add = set(missing_bid_ids) - set(processed_bid_ids)
-    
-    for bid_id in bids_to_add:
-        original_bid = original_merged_data[original_merged_data[bid_id_col] == bid_id].iloc[0]
+    facility_col = column_mapping['Facility']
+    incumbent_col = column_mapping['Incumbent']
+    baseline_price_col = column_mapping['Baseline Price']
+    bid_volume_col = column_mapping['Bid Volume']
+
+    # Check whether a 'Current Price' mapping exists
+    has_current_price = (
+        'Current Price' in column_mapping
+        and column_mapping['Current Price'] is not None
+        and column_mapping['Current Price'].lower() != 'none'
+    )
+    current_price_col = column_mapping.get('Current Price') if has_current_price else None
+
+    # Identify Bid IDs missing in the analysis DataFrame
+    all_bid_ids = original_merged_data[bid_id_col].unique()
+    processed_ids = best_of_best_excl_df[bid_id_col].unique()
+    missing_bids = set(all_bid_ids) - set(processed_ids)
+
+    for bid_id in missing_bids:
+        # Pick the first row with that missing Bid ID
+        original_row = original_merged_data.loc[original_merged_data[bid_id_col] == bid_id].iloc[0]
+
+        # Recalculate 'Baseline Spend' on the fly
+        volume_val = original_row[bid_volume_col]
+        base_price_val = original_row[baseline_price_col]
+        if pd.notna(volume_val) and pd.notna(base_price_val):
+            baseline_spend = volume_val * base_price_val
+        else:
+            baseline_spend = np.nan
+
+        # Handle Current Price if applicable
+        if current_price_col and current_price_col in original_merged_data.columns:
+            current_price_val = original_row[current_price_col]
+        else:
+            current_price_val = np.nan
+
+        # Construct a dictionary for the missing/unallocated row
         row_dict = {
             'Bid ID': bid_id,
             'Bid ID Split': 'A',
-            'Facility': original_bid[column_mapping['Facility']],
-            'Incumbent': original_bid[column_mapping['Incumbent']],
-            'Baseline Price': original_bid[column_mapping['Baseline Price']],
-            'Current Price': original_bid[column_mapping['Current Price']] if 'Current Price' in column_mapping else np.nan,
-            'Bid Volume': original_bid[column_mapping['Bid Volume']],
-            'Baseline Spend': original_bid['Baseline Spend'],  # Ensure 'Baseline Spend' is calculated beforehand
+            'Facility': original_row[facility_col],
+            'Incumbent': original_row[incumbent_col],
+            'Baseline Price': base_price_val,
+            'Current Price': current_price_val if has_current_price else np.nan,
+            'Bid Volume': volume_val,
+            'Baseline Spend': baseline_spend,
             'Awarded Supplier': 'Unallocated',
             'Awarded Supplier Price': np.nan,
             'Awarded Volume': np.nan,
@@ -43,60 +79,20 @@ def add_missing_bid_ids(best_of_best_excl_df, original_merged_data, column_mappi
             'Baseline Savings': np.nan,
             'Current Price Savings': np.nan
         }
-        best_of_best_excl_df = best_of_best_excl_df.append(row_dict, ignore_index=True)
-        logger.debug(f"Added unallocated Bid ID {bid_id} to the analysis.")
-    
+
+        # Convert row_dict into a DataFrame
+        row_df = pd.DataFrame([row_dict])
+        # Concat the new row onto the existing DataFrame
+        best_of_best_excl_df = pd.concat([best_of_best_excl_df, row_df], ignore_index=True)
+
+        logger.debug(
+            f"[{sheet_name}] Added unallocated row for missing Bid ID {bid_id}, "
+            f"Baseline Spend={baseline_spend}."
+        )
+
     return best_of_best_excl_df
 
-    """Add missing bid IDs to the analysis output with baseline info and 'Unallocated'."""
-    # Extract required column names from the mapping
-    bid_id_col = column_mapping['Bid ID']
-    bid_volume_col = column_mapping['Bid Volume']
-    baseline_price_col = column_mapping['Baseline Price']
-    facility_col = column_mapping['Facility']
-    incumbent_col = column_mapping['Incumbent']
 
-    # Identify missing bid IDs in the analysis data
-    missing_bid_ids = original_df[~original_df[bid_id_col].isin(analysis_df[bid_id_col])]
-
-    # Ensure we only have one row per missing Bid ID
-    missing_bid_ids = missing_bid_ids.drop_duplicates(subset=[bid_id_col])
-
-    # Fill missing bid IDs with baseline data and 'Unallocated' in the award sections
-    if not missing_bid_ids.empty:
-        missing_rows = []
-        for _, row in missing_bid_ids.iterrows():
-            bid_id = row[bid_id_col]
-            bid_volume = row[bid_volume_col]
-            baseline_price = row[baseline_price_col]
-            baseline_spend = bid_volume * baseline_price
-            facility = row[facility_col]
-            incumbent = row[incumbent_col]
-
-            missing_row = {
-                'Bid ID': bid_id,
-                'Bid ID Split': 'A',
-                'Facility': facility,
-                'Incumbent': incumbent,
-                'Baseline Price': baseline_price,
-                'Bid Volume': bid_volume,
-                'Baseline Spend': baseline_spend,
-                'Awarded Supplier': 'Unallocated',
-                'Awarded Supplier Price': None,
-                'Awarded Volume': None,
-                'Awarded Supplier Spend': None,
-                'Awarded Supplier Capacity': None,
-                'Savings': None
-            }
-            missing_rows.append(missing_row)
-            logger.debug(f"Added missing Bid ID {bid_id} back into analysis.")
-
-        missing_df = pd.DataFrame(missing_rows)
-
-        # Concatenate missing_df to analysis_df
-        analysis_df = pd.concat([analysis_df, missing_df], ignore_index=True)
-
-    return analysis_df
 
 def as_is_analysis(data, column_mapping):
     """Perform 'As-Is' analysis with normalized fields, including Current Price Savings."""
