@@ -1371,14 +1371,19 @@ def main():
                                                             st.error(f"An error occurred while assigning formulas to columns B-G in row {starting_row + 2}: {e}")
 
                                                         # ======= Advance the starting row =======
-                                                        # Since UNIQUE spills the results, we'll need to estimate the number of suppliers.
-                                                        # For simplicity, we'll add a fixed number of rows per group.
-                                                        # Adjust 'max_suppliers_per_group' as needed based on your data.
-                                                        max_suppliers_per_group = 10  # Example: Allow up to 10 suppliers per group
-                                                        starting_row += 2 + max_suppliers_per_group + 3  # Group label + header + supplier rows + spacing
+                                                        # Instead of guessing "10 suppliers," we look at how many suppliers we actually used.
 
-                                                                                    # ======= Add Drop-Down to 'Scenario Reports' Sheet =======
-                                                        # Restore the drop-down menu in cell A1
+                                                        # Example approach: scenario_reports_df contains data for the group,
+                                                        # so we filter by the current 'group' and count the unique suppliers.
+                                                        group_df = scenario_reports_df[scenario_reports_df[grouping_column] == group]
+                                                        supplier_count = group_df[st.session_state.column_mapping['Supplier Name']].nunique()
+
+                                                        # Now increment starting_row: +2 for the group label & header row, 
+                                                        # + supplier_count for actual lines used, 
+                                                        # + 3 for optional spacing after the last row.
+                                                        starting_row += 2 + supplier_count + 3  
+
+                                                        # ======= Add Drop-Down to 'Scenario Reports' Sheet =======
                                                         try:
                                                             dv_scenario = DataValidation(type="list", formula1="'Scenario Converter'!$B$1:$H$1", allow_blank=True)
                                                             scenario_reports_sheet.add_data_validation(dv_scenario)
