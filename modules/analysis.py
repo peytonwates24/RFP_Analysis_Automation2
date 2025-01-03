@@ -3,7 +3,94 @@ from .config import logger
 
 # Scenario Analysis
 
+import numpy as np  # Ensure this import is present to handle np.nan
+import pandas as pd  # Make sure you have imported pandas as well
+
 def add_missing_bid_ids(best_of_best_excl_df, original_merged_data, column_mapping, sheet_name):
+    """
+    Add missing Bid IDs to the analysis results by creating 'Unallocated' rows.
+
+    This version uses pd.concat instead of the deprecated DataFrame.append().
+    
+    Parameters:
+        best_of_best_excl_df (pd.DataFrame): The current analysis DataFrame.
+        original_merged_data (pd.DataFrame): The original merged DataFrame before exclusions.
+        column_mapping (dict): A mapping of standard column names to actual DataFrame column names.
+        sheet_name (str): The name of the sheet (for logging or further processing).
+    
+    Returns:
+        pd.DataFrame: Updated analysis DataFrame with missing Bid IDs handled.
+    """
+
+    # Extract mapped column names
+    bid_id_col = column_mapping['Bid ID']
+    facility_col = column_mapping['Facility']
+    incumbent_col = column_mapping['Incumbent']
+    baseline_price_col = column_mapping['Baseline Price']
+    bid_volume_col = column_mapping['Bid Volume']
+
+    # Check whether a 'Current Price' mapping exists
+    has_current_price = (
+        'Current Price' in column_mapping
+        and column_mapping['Current Price'] is not None
+        and column_mapping['Current Price'].lower() != 'none'
+    )
+    current_price_col = column_mapping.get('Current Price') if has_current_price else None
+
+    # Identify Bid IDs missing in the analysis DataFrame
+    all_bid_ids = original_merged_data[bid_id_col].unique()
+    processed_ids = best_of_best_excl_df[bid_id_col].unique()
+    missing_bids = set(all_bid_ids) - set(processed_ids)
+
+    for bid_id in missing_bids:
+        # Pick the first row with that missing Bid ID
+        original_row = original_merged_data.loc[original_merged_data[bid_id_col] == bid_id].iloc[0]
+
+        # Recalculate 'Baseline Spend' on the fly
+        volume_val = original_row[bid_volume_col]
+        base_price_val = original_row[baseline_price_col]
+        if pd.notna(volume_val) and pd.notna(base_price_val):
+            baseline_spend = volume_val * base_price_val
+        else:
+            baseline_spend = np.nan
+
+        # Handle Current Price if applicable
+        if current_price_col and current_price_col in original_merged_data.columns:
+            current_price_val = original_row[current_price_col]
+        else:
+            current_price_val = np.nan
+
+        # Construct a dictionary for the missing/unallocated row
+        row_dict = {
+            'Bid ID': bid_id,
+            'Bid ID Split': 'A',
+            'Facility': original_row[facility_col],
+            'Incumbent': original_row[incumbent_col],
+            'Baseline Price': base_price_val,
+            'Current Price': current_price_val if has_current_price else np.nan,
+            'Bid Volume': volume_val,
+            'Baseline Spend': baseline_spend,
+            'Awarded Supplier': 'Unallocated',
+            'Awarded Supplier Price': np.nan,
+            'Awarded Volume': np.nan,
+            'Awarded Supplier Spend': np.nan,
+            'Awarded Supplier Capacity': np.nan,
+            'Baseline Savings': np.nan,
+            'Current Price Savings': np.nan
+        }
+
+        # Convert row_dict into a DataFrame
+        row_df = pd.DataFrame([row_dict])
+        # Concat the new row onto the existing DataFrame
+        best_of_best_excl_df = pd.concat([best_of_best_excl_df, row_df], ignore_index=True)
+
+        logger.debug(
+            f"[{sheet_name}] Added unallocated row for missing Bid ID {bid_id}, "
+            f"Baseline Spend={baseline_spend}."
+        )
+
+    return best_of_best_excl_df
+
     """
     Add missing Bid IDs to the analysis results.
 
