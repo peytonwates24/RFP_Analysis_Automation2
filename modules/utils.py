@@ -2,9 +2,9 @@
 import streamlit as st
 import pandas as pd
 from .config import logger
-import uuid
-import datetime
+from decimal import Decimal
 
+from decimal import Decimal
 
 def normalize_columns(df):
     column_mapping = {
@@ -13,6 +13,7 @@ def normalize_columns(df):
         'product_type': 'Product Type',
         'incumbent': 'Incumbent',
         'baseline_price': 'Baseline Price',
+        'current_price': 'Current Price',
         'bid_supplier_name': 'Supplier Name',
         'bid_supplier_capacity': 'Supplier Capacity',
         'bid_price': 'Bid Price',
@@ -20,52 +21,47 @@ def normalize_columns(df):
         'bid_volume': 'Bid Volume',
         'facility': 'Facility'
     }
-    return df.rename(columns=column_mapping)
 
-# Example implementation in modules/utils.py
+    # Instead of float, specify Decimal for price columns:
+    known_dtypes = {
+        'Bid ID': str,
+        'Business Group': str,
+        'Product Type': str,
+        'Incumbent': str,
+        'Baseline Price': Decimal, 
+        'Supplier Name': str,
+        'Supplier Capacity': Decimal,
+        'Bid Price': Decimal,      
+        'Bid Volume': Decimal,
+        'Facility': str,
+        'Current Price': Decimal
+    }
 
-# Function to validate uploaded file
-def validate_uploaded_file(uploaded_file) -> bool:
-    """
-    Validates the uploaded Excel file.
-    
-    Criteria:
-    - Must contain all required columns.
-    """
-    try:
-        # Attempt to read the Excel file
-        df = pd.read_excel(uploaded_file, engine='openpyxl')
-        
-        # Define required columns based on the Supabase table
-        required_columns = [
-            'bid_id',
-            'supplier_name',
-            'facility',
-            'baseline_price',
-            'current_price',
-            'bid_volume',
-            'bid_price',
-            'supplier_capacity'
-            # Add other required columns
-        ]
-        
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            st.error(f"Missing columns: {', '.join(missing_columns)}")
-            logger.error(f"Uploaded file '{uploaded_file.name}' is missing columns: {', '.join(missing_columns)}")
-            return False
-        
-        return True
-    except Exception as e:
-        st.error(f"Error reading the uploaded file: {e}")
-        logger.error(f"Error reading the uploaded file '{uploaded_file.name}': {e}")
+    df.columns = [col.strip().lower() for col in df.columns]
+    df = df.rename(columns=column_mapping)
+    df.columns = [col.strip().title() for col in df.columns]
+
+    for col in df.columns:
+        if col in known_dtypes:
+            desired_dtype = known_dtypes[col]
+        else:
+            desired_dtype = str
+
+        if desired_dtype == str:
+            df[col] = df[col].astype(str).str.strip()
+        elif desired_dtype == Decimal:
+            # Convert to string first, strip whitespace, then Decimal
+            df[col] = df[col].astype(str).str.strip().apply(lambda x: Decimal(x) if x not in ["", "nan"] else None)
+        else:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype(desired_dtype, errors='ignore')
+    return df
+
+
+def validate_uploaded_file(file):
+    if not file:
+        st.error("No file uploaded. Please upload an Excel file.")
         return False
-
-# Function to generate a unique file name
-def generate_unique_filename(original_filename):
-    unique_id = uuid.uuid4().hex
-    if '.' in original_filename:
-        name, extension = original_filename.rsplit('.', 1)
-        return f"{name}_{unique_id}.{extension}"
-    else:
-        return f"{original_filename}_{unique_id}"
+    if not file.name.endswith('.xlsx'):
+        st.error("Invalid file type. Please upload an Excel file (.xlsx).")
+        return False
+    return True
