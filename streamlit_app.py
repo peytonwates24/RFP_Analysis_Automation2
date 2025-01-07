@@ -461,7 +461,7 @@ def main():
                         key=f"{col}_mapping"
                     )
 
-
+            # Note
             # After mapping, check if all required columns are mapped
             missing_columns = [col for col in required_columns if col not in st.session_state.column_mapping or st.session_state.column_mapping[col] not in st.session_state.merged_data.columns]
             if missing_columns:
