@@ -9,7 +9,7 @@ from modules.data_loader import *
 from modules.analysis import *
 from modules.presentations import *
 from modules.projects import *
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import *
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.styles import Font
@@ -285,7 +285,6 @@ def main():
         st.title('Start a New Analysis')
         st.write("Upload your data here.")
 
-        # Select data input method
         data_input_method = st.radio(
             "Select Data Input Method",
             ('Separate Bid & Baseline files', 'Merged Data'),
@@ -294,13 +293,10 @@ def main():
         )
 
         if data_input_method == 'Separate Bid & Baseline files':
-           
             st.header("Upload Baseline and Bid Files")
 
             # Upload baseline file
             baseline_file = st.file_uploader("Upload Baseline Sheet", type=["xlsx"])
-
-            # Sheet selection for Baseline File
             baseline_sheet = None
             if baseline_file:
                 try:
@@ -315,13 +311,11 @@ def main():
                     logger.error(f"Error reading baseline file: {e}")
 
             num_files = st.number_input("Number of Bid Sheets to Upload", min_value=1, step=1)
-
             bid_files_suppliers = []
             for i in range(int(num_files)):
                 bid_file = st.file_uploader(f"Upload Bid Sheet {i + 1}", type=["xlsx"], key=f'bid_file_{i}')
                 supplier_name = st.text_input(f"Supplier Name for Bid Sheet {i + 1}", key=f'supplier_name_{i}')
-                
-                # Sheet selection for each Bid File
+
                 bid_sheet = None
                 if bid_file and supplier_name:
                     try:
@@ -334,6 +328,7 @@ def main():
                     except Exception as e:
                         st.error(f"Error reading Bid Sheet {i + 1}: {e}")
                         logger.error(f"Error reading Bid Sheet {i + 1}: {e}")
+
                 if bid_file and supplier_name and bid_sheet:
                     bid_files_suppliers.append((bid_file, supplier_name, bid_sheet))
                     logger.info(f"Uploaded Bid Sheet {i + 1} for supplier '{supplier_name}' with sheet '{bid_sheet}'.")
@@ -350,8 +345,21 @@ def main():
                             st.session_state.original_merged_data = merged_data.copy()
                             st.session_state.columns = list(merged_data.columns)
                             st.session_state.baseline_data = load_baseline_data(baseline_file, baseline_sheet)
+
                             st.success("Data merged successfully. Please map the columns for analysis.")
                             logger.info("Data merged successfully.")
+
+                            # Run the non-blocking warnings
+                            with st.expander("Error Checking Report", expanded=False) as exp:
+                                # Create a container inside the expander
+                                error_container = st.container()
+                                run_merge_warnings(
+                                    st.session_state.baseline_data,
+                                    st.session_state.merged_data,
+                                    bid_files_suppliers,
+                                    container=error_container
+                                )
+
 
         else:
             # For Merged Data input method
@@ -373,7 +381,6 @@ def main():
             if merged_file and merged_sheet:
                 try:
                     merged_data = pd.read_excel(merged_file, sheet_name=merged_sheet, engine='openpyxl')
-                    # Normalize columns
                     merged_data = normalize_columns(merged_data)
                     st.session_state.merged_data = merged_data
                     st.session_state.original_merged_data = merged_data.copy()
@@ -385,56 +392,48 @@ def main():
                     st.error(f"Error loading merged data: {e}")
                     logger.error(f"Error loading merged data: {e}")
 
-        if st.session_state.merged_data is not None:
-
+        # Export logic if st.session_state.merged_data is not None
+        if 'merged_data' in st.session_state and st.session_state.merged_data is not None:
             st.subheader("Export Merged Data Before Mapping")
 
+            CURRENCY_COLUMNS = ['Baseline Price', 'Current Price', 'Bid Price']
+            NUMBER_COLUMNS = ['Bid Volume', 'Supplier Capacity']
 
-
-            # Let's define which columns are currency vs. generic numeric
-            CURRENCY_COLUMNS = ['Baseline Price', 'Current Price', 'Bid Price']  
-            NUMBER_COLUMNS = ['Bid Volume', 'Supplier Capacity']                 
-
-            # 1) Convert columns to floats and remove floating artifacts 
-            #    (No forced rounding to fewer decimals, just remove binary noise)
+            # Remove float artifacts if needed
             for col in CURRENCY_COLUMNS + NUMBER_COLUMNS:
                 if col in st.session_state.merged_data.columns:
                     st.session_state.merged_data[col] = (
                         st.session_state.merged_data[col]
-                        .astype(float)
-                        .round(15)  # Enough precision to avoid artifacts like 0.14500000000000002
+                        .astype(float, errors='ignore')
+                        .round(15)
                     )
 
-            # 2) Write the DataFrame to an in-memory Excel file
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                st.session_state.merged_data.to_excel(writer, index=False, sheet_name='MergedData')
+                final_df = normalize_columns(st.session_state.merged_data)
+                final_df.to_excel(writer, index=False, sheet_name='MergedData')
 
                 workbook = writer.book
                 worksheet = writer.sheets['MergedData']
 
-                # 3a) Apply a currency format to CURRENCY_COLUMNS
+                # Format currency columns
                 for col_name in CURRENCY_COLUMNS:
-                    if col_name in st.session_state.merged_data.columns:
-                        col_idx = st.session_state.merged_data.columns.get_loc(col_name) + 1
-                        # Rows start at 2 because row=1 is the header
-                        for row in range(2, len(st.session_state.merged_data) + 2):
+                    if col_name in final_df.columns:
+                        col_idx = final_df.columns.get_loc(col_name) + 1
+                        for row in range(2, len(final_df) + 2):
                             cell = worksheet.cell(row=row, column=col_idx)
-                            cell.number_format = '$#,##0.00'  # 2 decimal places, comma separators, $ sign
+                            cell.number_format = '$#,##0.00'
 
-                # 3b) Apply a plain numeric format (e.g., 'General') to NUMBER_COLUMNS
+                # Format numeric columns
                 for col_name in NUMBER_COLUMNS:
-                    if col_name in st.session_state.merged_data.columns:
-                        col_idx = st.session_state.merged_data.columns.get_loc(col_name) + 1
-                        for row in range(2, len(st.session_state.merged_data) + 2):
+                    if col_name in final_df.columns:
+                        col_idx = final_df.columns.get_loc(col_name) + 1
+                        for row in range(2, len(final_df) + 2):
                             cell = worksheet.cell(row=row, column=col_idx)
-                            # "General" means Excel will show as a normal number without currency
                             cell.number_format = 'General'
 
-            # 4) Retrieve the final Excel bytes
             excel_data = output.getvalue()
 
-            # 5) Provide a download button in Streamlit
             st.download_button(
                 label="Export Merged Data (Excel)",
                 data=excel_data,
