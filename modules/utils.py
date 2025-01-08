@@ -64,4 +64,12 @@ def validate_uploaded_file(file):
     if not file.name.endswith('.xlsx'):
         st.error("Invalid file type. Please upload an Excel file (.xlsx).")
         return False
-    return True
+
+# Function to generate a unique file name
+def generate_unique_filename(original_filename):
+    unique_id = uuid.uuid4().hex
+    if '.' in original_filename:
+        name, extension = original_filename.rsplit('.', 1)
+        return f"{name}_{unique_id}.{extension}"
+    else:
+        return f"{original_filename}_{unique_id}"

@@ -4,17 +4,15 @@ import io
 import os
 from modules.config import logger, BASE_PROJECTS_DIR, config
 from modules.authentication import authenticate_user
-from modules.utils import normalize_columns, validate_uploaded_file
 from modules.data_loader import load_baseline_data, start_process
 from modules.analysis import *
 from modules.presentations import *
 from modules.projects import get_user_projects, create_project, delete_project
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import validate_uploaded_file, run_merge_warnings, normalize_columns
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.styles import Font
 from openpyxl import Workbook
-from openpyxl.utils import column_index_from_string
 from pptx import Presentation
 
 
@@ -342,6 +340,14 @@ def main():
                             st.session_state.baseline_data = load_baseline_data(baseline_file, baseline_sheet)
                             st.success("Data merged successfully. Please map the columns for analysis.")
                             logger.info("Data merged successfully.")
+
+
+                            # ---- Run the warning checks ----
+                            run_merge_warnings(
+                                st.session_state.baseline_data,
+                                st.session_state.merged_data,
+                                bid_files_suppliers
+                            )
 
         else:
             # For Merged Data input method
