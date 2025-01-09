@@ -7,20 +7,20 @@ import numpy as np  # Ensure this import is present to handle np.nan
 import pandas as pd  # Make sure you have imported pandas as well
 
 def add_missing_bid_ids(best_of_best_excl_df, original_merged_data, column_mapping, sheet_name):
-    """
-    Add missing Bid IDs to the analysis results by creating 'Unallocated' rows.
+    # """
+    # Add missing Bid IDs to the analysis results by creating 'Unallocated' rows.
 
-    This version uses pd.concat instead of the deprecated DataFrame.append().
+    # This version uses pd.concat instead of the deprecated DataFrame.append().
     
-    Parameters:
-        best_of_best_excl_df (pd.DataFrame): The current analysis DataFrame.
-        original_merged_data (pd.DataFrame): The original merged DataFrame before exclusions.
-        column_mapping (dict): A mapping of standard column names to actual DataFrame column names.
-        sheet_name (str): The name of the sheet (for logging or further processing).
+    # Parameters:
+    #     best_of_best_excl_df (pd.DataFrame): The current analysis DataFrame.
+    #     original_merged_data (pd.DataFrame): The original merged DataFrame before exclusions.
+    #     column_mapping (dict): A mapping of standard column names to actual DataFrame column names.
+    #     sheet_name (str): The name of the sheet (for logging or further processing).
     
-    Returns:
-        pd.DataFrame: Updated analysis DataFrame with missing Bid IDs handled.
-    """
+    # Returns:
+    #     pd.DataFrame: Updated analysis DataFrame with missing Bid IDs handled.
+    # """
 
     # Extract mapped column names
     bid_id_col = column_mapping['Bid ID']
