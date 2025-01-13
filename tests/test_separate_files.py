@@ -10,18 +10,7 @@ from modules.data_loader import *
 from io import BytesIO
 from pptx import Presentation
 
-# tests/test_separate_files.py
-
-import pytest
-import pandas as pd
-from io import BytesIO
-from pathlib import Path
-from openpyxl import Workbook
-
-# Import necessary functions from your analysis module
-from modules.analysis import *
-
-@pytest.mark.separate
+@pytest.mark.separate  # or whichever mark you prefer for test_1
 def test_run_analysis_separate(get_test_data_dir, setup_logging):
     """
     Test the analysis pipeline with separate bid & baseline files.
@@ -45,7 +34,7 @@ def test_run_analysis_separate(get_test_data_dir, setup_logging):
         assert file.exists(), f"Required test file {file} does not exist."
         logger.info(f"Found required file: {file}")
 
-    # Load data based on upload method
+    # Load data
     bid_dfs = [pd.read_excel(bid_file, engine='openpyxl') for bid_file in bid_files]
     merged_df = pd.concat(bid_dfs, ignore_index=True)
     baseline_df = pd.read_excel(baseline_file, engine='openpyxl')
@@ -58,14 +47,13 @@ def test_run_analysis_separate(get_test_data_dir, setup_logging):
     )
     logger.debug(f"Merged DataFrame columns after merge: {merged_df.columns.tolist()}")
 
-    # Combine suffixed columns for 'separate' upload method
+    # Combine suffixed columns
     merged_df.loc[:, 'Facility'] = merged_df['Facility_baseline'].combine_first(merged_df['Facility_bid'])
     merged_df.loc[:, 'Bid Volume'] = merged_df['Bid Volume_baseline'].combine_first(merged_df['Bid Volume_bid'])
-    # Drop the suffixed columns
     merged_df.drop(['Facility_baseline', 'Facility_bid', 'Bid Volume_baseline', 'Bid Volume_bid'], axis=1, inplace=True)
     logger.debug(f"Columns after combining suffixed columns: {merged_df.columns.tolist()}")
 
-    # Apply column mapping
+    # Column mapping
     merged_df = normalize_columns(merged_df)
     column_mapping = {
         'Bid ID': 'Bid ID',
@@ -75,14 +63,12 @@ def test_run_analysis_separate(get_test_data_dir, setup_logging):
         'Baseline Price': 'Baseline Price',
         'Current Price': 'Current Price',
         'Bid Price': 'Bid Price',
-        'Supplier Capacity': 'Bid Supplier Capacity',  # Changed key
-        'Supplier Name': 'Bid Supplier Name'          # Changed key
+        'Supplier Capacity': 'Bid Supplier Capacity',
+        'Supplier Name': 'Bid Supplier Name'
     }
 
-    # Debugging: Check columns after normalization
+    # Check columns
     logger.debug(f"Columns after normalization: {merged_df.columns.tolist()}")
-
-    # Ensure all required columns are present
     required_columns = list(column_mapping.values())
     missing_columns = [col for col in required_columns if col not in merged_df.columns]
     assert not missing_columns, f"Missing columns in merged data: {missing_columns}"
@@ -92,11 +78,10 @@ def test_run_analysis_separate(get_test_data_dir, setup_logging):
     merged_df.loc[:, 'Awarded Supplier'] = merged_df['Bid Supplier Name']
     logger.info("Added 'Awarded Supplier' column.")
 
-    # Apply exclusion rules
+    # Exclusions & analyses
     exclusions_bob = [("Supplier 1", "Business Group", "Equal to", "Group 1", True)]
     exclusions_ais = [("Supplier 5", "Product Type", "Equal to", "A", True)]
 
-    # Run analyses
     as_is_df = as_is_analysis(merged_df, column_mapping)
     as_is_df = add_missing_bid_ids(as_is_df, merged_df, column_mapping, 'As-Is')
 
@@ -128,76 +113,76 @@ def test_run_analysis_separate(get_test_data_dir, setup_logging):
     )
 
     bid_coverage_variations = ["Competitiveness Report", "Supplier Coverage", "Facility Coverage"]
-    group_by_field = "Product Type"
-    bid_coverage_reports = bid_coverage_report(
+    coverage_reports = bid_coverage_report(
         merged_df,
         column_mapping,
         bid_coverage_variations,
-        group_by_field
+        group_by_field="Product Type"
     )
 
-    customizable_grouping_column = "Product Type"
     customizable_df = customizable_analysis(merged_df, column_mapping)
 
-    # Generate Excel output
+    # Generate Excel
     excel_output = BytesIO()
     with pd.ExcelWriter(excel_output, engine='openpyxl') as writer:
         as_is_df.to_excel(writer, sheet_name='#As-Is', index=False)
         best_of_best_df.to_excel(writer, sheet_name='#Best of Best', index=False)
         best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
         as_is_excl_df.to_excel(writer, sheet_name='#As-Is Excl Suppliers', index=False)
-        for report_name, report_df in bid_coverage_reports.items():
-            sheet_name = report_name.replace(" ", "_")[:31]  # Excel sheet name limit
+        for report_name, report_df in coverage_reports.items():
+            sheet_name = report_name.replace(" ", "_")[:31]
             report_df.to_excel(writer, sheet_name=sheet_name, index=False)
         customizable_df.to_excel(writer, sheet_name='Customizable Template', index=False)
 
-    # Read the generated Excel for comparison
     generated_excel = pd.read_excel(BytesIO(excel_output.getvalue()), sheet_name=None)
 
-    # Define output directory for saving generated and expected files
+    # Output dir & stale diff cleanup
     output_dir = Path('tests/test_outputs') / upload_method
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save the generated Excel for manual inspection
+    # Remove stale diff files if any
+    for diff_file in output_dir.glob("diff_*_*.xlsx"):
+        try:
+            diff_file.unlink()
+            logger.info(f"Removed old diff file: {diff_file}")
+        except OSError as e:
+            logger.warning(f"Could not remove {diff_file}: {e}")
+
+    # Save generated Excel
     generated_excel_save_path = output_dir / f'generated_excel_output_{upload_method}.xlsx'
     with pd.ExcelWriter(generated_excel_save_path, engine='openpyxl') as writer:
         for sheet_name, df in generated_excel.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
     logger.info(f"Generated Excel saved to {generated_excel_save_path}")
 
-    # Check if expected Excel exists
+    # Compare to expected
     if not expected_excel_path.exists():
-        # If not, save the current generated as expected and skip the test
         with pd.ExcelWriter(expected_excel_path, engine='openpyxl') as writer:
             for sheet_name, df in generated_excel.items():
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
         logger.info(f"Expected Excel created at {expected_excel_path}")
-        pytest.skip("Expected Excel file was missing and has been created. Please rerun the tests.")
-    else:
-        # Read the expected Excel
-        expected_excel = pd.read_excel(expected_excel_path, sheet_name=None)
+        pytest.skip("Expected Excel file was missing; created. Please rerun.")
 
-        # Compare Excel sheets
+    else:
+        expected_excel = pd.read_excel(expected_excel_path, sheet_name=None)
         try:
             for sheet_name, expected_df in expected_excel.items():
-                assert sheet_name in generated_excel, f"Sheet '{sheet_name}' is missing in the generated Excel."
-                generated_df = generated_excel[sheet_name]
-                # Compare DataFrames
+                assert sheet_name in generated_excel, f"Sheet '{sheet_name}' missing in generated output."
+                gen_df = generated_excel[sheet_name]
                 pd.testing.assert_frame_equal(
-                    generated_df.reset_index(drop=True),
+                    gen_df.reset_index(drop=True),
                     expected_df.reset_index(drop=True),
                     check_dtype=False,
                     check_like=True,
-                    atol=1e-2,  # Allow small numerical differences
+                    atol=1e-2,
                     obj=f"Sheet '{sheet_name}' does not match expected output."
                 )
                 logger.info(f"Sheet '{sheet_name}' matches expected output.")
         except AssertionError as e:
-            # Save the differing sheet for review
-            differing_sheet_path = output_dir / f'diff_{sheet_name}_{upload_method}.xlsx'
-            with pd.ExcelWriter(differing_sheet_path, engine='openpyxl') as writer:
-                generated_df.to_excel(writer, sheet_name='Generated', index=False)
+            diff_file = output_dir / f'diff_{sheet_name}_{upload_method}.xlsx'
+            with pd.ExcelWriter(diff_file, engine='openpyxl') as writer:
+                gen_df.to_excel(writer, sheet_name='Generated', index=False)
                 expected_df.to_excel(writer, sheet_name='Expected', index=False)
             logger.error(str(e))
-            logger.info(f"Differing sheet saved to {differing_sheet_path}")
+            logger.info(f"Differing sheet saved to {diff_file}")
             pytest.fail(str(e))
