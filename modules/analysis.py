@@ -181,68 +181,36 @@ def add_missing_bid_ids(best_of_best_excl_df, original_merged_data, column_mappi
     return best_of_best_excl_df
  
     """
-    Add missing Bid IDs to the analysis results by creating 'Unallocated' rows.
+    Add missing Bid IDs to the analysis results.
  
-    This version uses pd.concat instead of the deprecated DataFrame.append().
-   
     Parameters:
         best_of_best_excl_df (pd.DataFrame): The current analysis DataFrame.
         original_merged_data (pd.DataFrame): The original merged DataFrame before exclusions.
         column_mapping (dict): A mapping of standard column names to actual DataFrame column names.
-        sheet_name (str): The name of the sheet (for logging or further processing).
-   
+        sheet_name (str): The name of the sheet for logging or further processing.
+ 
     Returns:
         pd.DataFrame: Updated analysis DataFrame with missing Bid IDs handled.
     """
- 
-    # Extract mapped column names
+    # Extract Bid ID column name from column_mapping
     bid_id_col = column_mapping['Bid ID']
-    facility_col = column_mapping['Facility']
-    incumbent_col = column_mapping['Incumbent']
-    baseline_price_col = column_mapping['Baseline Price']
-    bid_volume_col = column_mapping['Bid Volume']
- 
-    # Check whether a 'Current Price' mapping exists
-    has_current_price = (
-        'Current Price' in column_mapping
-        and column_mapping['Current Price'] is not None
-        and column_mapping['Current Price'].lower() != 'none'
-    )
-    current_price_col = column_mapping.get('Current Price') if has_current_price else None
- 
-    # Identify Bid IDs missing in the analysis DataFrame
-    all_bid_ids = original_merged_data[bid_id_col].unique()
-    processed_ids = best_of_best_excl_df[bid_id_col].unique()
-    missing_bids = set(all_bid_ids) - set(processed_ids)
- 
-    for bid_id in missing_bids:
-        # Pick the first row with that missing Bid ID
-        original_row = original_merged_data.loc[original_merged_data[bid_id_col] == bid_id].iloc[0]
- 
-        # Recalculate 'Baseline Spend' on the fly
-        volume_val = original_row[bid_volume_col]
-        base_price_val = original_row[baseline_price_col]
-        if pd.notna(volume_val) and pd.notna(base_price_val):
-            baseline_spend = volume_val * base_price_val
-        else:
-            baseline_spend = np.nan
- 
-        # Handle Current Price if applicable
-        if current_price_col and current_price_col in original_merged_data.columns:
-            current_price_val = original_row[current_price_col]
-        else:
-            current_price_val = np.nan
- 
-        # Construct a dictionary for the missing/unallocated row
+   
+    # Identify missing Bid IDs
+    missing_bid_ids = original_merged_data[bid_id_col].unique()
+    processed_bid_ids = best_of_best_excl_df[bid_id_col].unique()
+    bids_to_add = set(missing_bid_ids) - set(processed_bid_ids)
+   
+    for bid_id in bids_to_add:
+        original_bid = original_merged_data[original_merged_data[bid_id_col] == bid_id].iloc[0]
         row_dict = {
             'Bid ID': bid_id,
             'Bid ID Split': 'A',
-            'Facility': original_row[facility_col],
-            'Incumbent': original_row[incumbent_col],
-            'Baseline Price': base_price_val,
-            'Current Price': current_price_val if has_current_price else np.nan,
-            'Bid Volume': volume_val,
-            'Baseline Spend': baseline_spend,
+            'Facility': original_bid[column_mapping['Facility']],
+            'Incumbent': original_bid[column_mapping['Incumbent']],
+            'Baseline Price': original_bid[column_mapping['Baseline Price']],
+            'Current Price': original_bid[column_mapping['Current Price']] if 'Current Price' in column_mapping else np.nan,
+            'Bid Volume': original_bid[column_mapping['Bid Volume']],
+            'Baseline Spend': original_bid['Baseline Spend'],  # Ensure 'Baseline Spend' is calculated beforehand
             'Awarded Supplier': 'Unallocated',
             'Awarded Supplier Price': np.nan,
             'Awarded Volume': np.nan,
@@ -766,9 +734,6 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     """Perform 'As-Is Excluding Suppliers' analysis with exclusion rules, including Current Price Savings."""
     logger.info("Starting As-Is Excluding Suppliers analysis.")
    
-    # Strip leading/trailing spaces from all column names
-    data.columns = data.columns.str.strip()
-   
     # Column mappings
     bid_price_col = column_mapping['Bid Price']
     bid_volume_col = column_mapping['Bid Volume']
@@ -786,8 +751,8 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
         data['Current Price'] = data[current_price_col]
    
     # Standardize supplier and incumbent names
-    data[supplier_name_col] = data[supplier_name_col].astype(str).str.title().str.strip()
-    data[incumbent_col] = data[incumbent_col].astype(str).str.title().str.strip()
+    data[supplier_name_col] = data[supplier_name_col].str.title()
+    data[incumbent_col] = data[incumbent_col].str.title()
    
     # Treat bids with Bid Price NaN or 0 as 'No Bid'
     data['Valid Bid'] = data[bid_price_col].notna() & (data[bid_price_col] != 0)
@@ -795,35 +760,16 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     # Apply exclusion rules specific to this analysis
     for condition in excluded_conditions:
         supplier, field, logic, value, exclude_all = condition
-        supplier = supplier.strip().title()
-        if isinstance(value, str):
-            value = value.strip().title()
-       
         if exclude_all:
-            data = data[data[supplier_name_col].str.lower() != supplier.lower()]
+            data = data[data[supplier_name_col] != supplier]
             logger.debug(f"Excluding all bids from supplier {supplier} in As-Is Excluding Suppliers analysis.")
         else:
-            if field not in data.columns:
-                logger.warning(f"Field '{field}' does not exist in data. Skipping this condition.")
-                continue
             if logic == "Equal to":
-                if pd.api.types.is_string_dtype(data[field]):
-                    data = data[~((data[supplier_name_col].str.lower() == supplier.lower()) &
-                                 (data[field].astype(str).str.lower().str.strip() == value.lower()))]
-                else:
-                    data = data[~((data[supplier_name_col].str.lower() == supplier.lower()) &
-                                 (data[field] == value))]
+                data = data[~((data[supplier_name_col] == supplier) & (data[field] == value))]
                 logger.debug(f"Excluding bids from supplier {supplier} where {field} == {value}.")
             elif logic == "Not equal to":
-                if pd.api.types.is_string_dtype(data[field]):
-                    data = data[~((data[supplier_name_col].str.lower() == supplier.lower()) &
-                                 (data[field].astype(str).str.lower().str.strip() != value.lower()))]
-                else:
-                    data = data[~((data[supplier_name_col].str.lower() == supplier.lower()) &
-                                 (data[field] != value))]
+                data = data[~((data[supplier_name_col] == supplier) & (data[field] != value))]
                 logger.debug(f"Excluding bids from supplier {supplier} where {field} != {value}.")
-            else:
-                logger.warning(f"Unknown logic '{logic}' in condition: {condition}")
    
     bid_data = data.loc[data['Valid Bid']]
     data['Baseline Spend'] = data[bid_volume_col] * data[baseline_price_col]
@@ -833,8 +779,6 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     for bid_id in bid_ids:
         bid_rows = bid_data[bid_data[bid_id_col] == bid_id]
         all_rows = data[data[bid_id_col] == bid_id]
-        if all_rows.empty:
-            continue  # No data for this bid_id
         incumbent = all_rows[incumbent_col].iloc[0]
         facility = all_rows[facility_col].iloc[0]
         baseline_price = all_rows[baseline_price_col].iloc[0]
@@ -845,30 +789,14 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
         incumbent_excluded = False
         for condition in excluded_conditions:
             supplier, field, logic, value, exclude_all = condition
-            supplier = supplier.strip().title()
-            if supplier != incumbent:
-                continue
-            if exclude_all:
-                incumbent_excluded = True
-                break
-            if field not in all_rows.columns:
-                logger.warning(f"Field '{field}' does not exist in data. Skipping this condition for incumbent.")
-                continue
-            incumbent_field_value = all_rows[field].iloc[0]
-            if pd.api.types.is_string_dtype(all_rows[field]):
-                incumbent_field_value = str(incumbent_field_value).strip().title()
-                value_comp = str(value).strip().title()
-                if logic == "Equal to" and incumbent_field_value == value_comp:
+            if supplier == incumbent:
+                if exclude_all:
                     incumbent_excluded = True
                     break
-                elif logic == "Not equal to" and incumbent_field_value != value_comp:
+                elif logic == "Equal to" and all_rows[field].iloc[0] == value:
                     incumbent_excluded = True
                     break
-            else:
-                if logic == "Equal to" and incumbent_field_value == value:
-                    incumbent_excluded = True
-                    break
-                elif logic == "Not equal to" and incumbent_field_value != value:
+                elif logic == "Not equal to" and all_rows[field].iloc[0] != value:
                     incumbent_excluded = True
                     break
  
@@ -900,7 +828,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 }
  
                 if has_current_price:
-                    current_price = data.loc[data[bid_id_col] == bid_id, current_price_col].iloc[0]
+                    current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
                     row_dict['Current Price'] = current_price
                     if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
                         row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
@@ -986,7 +914,6 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 }
  
                 if has_current_price:
-                    current_price = data.loc[data[bid_id_col] == bid_id, current_price_col].iloc[0]
                     row_dict['Current Price'] = current_price
                     row_dict['Current Price Savings'] = None
  
@@ -1018,7 +945,7 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
                 }
  
                 if has_current_price:
-                    current_price = data.loc[data[bid_id_col] == bid_id, current_price_col].iloc[0]
+                    current_price = data.loc[data[bid_id_col] == bid_id, 'Current Price'].iloc[0]
                     row_dict['Current Price'] = current_price
                     if row_dict['Awarded Supplier Price'] is not None and row_dict['Bid Volume'] is not None:
                         row_dict['Current Price Savings'] = (current_price - row_dict['Awarded Supplier Price']) * row_dict['Bid Volume']
@@ -1083,7 +1010,6 @@ def as_is_excluding_suppliers_analysis(data, column_mapping, excluded_conditions
     as_is_excl_df = as_is_excl_df.reindex(columns=desired_columns)
  
     return as_is_excl_df
- 
  
 def customizable_analysis(data, column_mapping):
     """Perform 'Customizable Analysis' and prepare data for Excel output."""
