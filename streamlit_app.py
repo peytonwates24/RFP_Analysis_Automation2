@@ -283,8 +283,8 @@ def main():
             key='data_input_method'
         )
  
+        # Use the selected method in your code
         if data_input_method == 'Separate Bid & Baseline files':
-          
             st.header("Upload Baseline and Bid Files")
  
             # Upload baseline file
@@ -310,8 +310,7 @@ def main():
             for i in range(int(num_files)):
                 bid_file = st.file_uploader(f"Upload Bid Sheet {i + 1}", type=["xlsx"], key=f'bid_file_{i}')
                 supplier_name = st.text_input(f"Supplier Name for Bid Sheet {i + 1}", key=f'supplier_name_{i}')
-               
-                # Sheet selection for each Bid File
+ 
                 bid_sheet = None
                 if bid_file and supplier_name:
                     try:
