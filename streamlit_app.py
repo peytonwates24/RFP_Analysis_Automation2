@@ -284,6 +284,7 @@ def main():
         st.title('Start a New Analysis')
         st.write("Upload your data here.")
  
+        # Select data input method
         data_input_method = st.radio(
             "Select Data Input Method",
             ('Separate Bid & Baseline files', 'Merged Data'),
@@ -291,11 +292,15 @@ def main():
             key='data_input_method'
         )
  
+        # Use the selected method in your code
         if data_input_method == 'Separate Bid & Baseline files':
+            # Existing steps for separate files
             st.header("Upload Baseline and Bid Files")
  
             # Upload baseline file
             baseline_file = st.file_uploader("Upload Baseline Sheet", type=["xlsx"])
+ 
+            # Sheet selection for Baseline File
             baseline_sheet = None
             if baseline_file:
                 try:
@@ -310,11 +315,12 @@ def main():
                     logger.error(f"Error reading baseline file: {e}")
  
             num_files = st.number_input("Number of Bid Sheets to Upload", min_value=1, step=1)
+ 
             bid_files_suppliers = []
             for i in range(int(num_files)):
                 bid_file = st.file_uploader(f"Upload Bid Sheet {i + 1}", type=["xlsx"], key=f'bid_file_{i}')
                 supplier_name = st.text_input(f"Supplier Name for Bid Sheet {i + 1}", key=f'supplier_name_{i}')
- 
+                # Sheet selection for each Bid File
                 bid_sheet = None
                 if bid_file and supplier_name:
                     try:
@@ -327,7 +333,6 @@ def main():
                     except Exception as e:
                         st.error(f"Error reading Bid Sheet {i + 1}: {e}")
                         logger.error(f"Error reading Bid Sheet {i + 1}: {e}")
- 
                 if bid_file and supplier_name and bid_sheet:
                     bid_files_suppliers.append((bid_file, supplier_name, bid_sheet))
                     logger.info(f"Uploaded Bid Sheet {i + 1} for supplier '{supplier_name}' with sheet '{bid_sheet}'.")
