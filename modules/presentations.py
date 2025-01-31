@@ -508,6 +508,15 @@ def create_scenario_summary_presentation(scenario_dataframes, template_file_path
     Creates a Presentation object based on the scenario DataFrames and a template file,
     including main scenario summaries and optional sub-summaries if toggled on.
     """
+    logger.info("[CHECKPOINT] Entering create_scenario_summary_presentation. Sheets = %s", list(scenario_dataframes.keys()))
+    # If you do any summation or final pivot of 'Savings':
+    for sn, df in scenario_dataframes.items():
+        if 'Baseline Savings' in df.columns:
+            total_savings = df['Baseline Savings'].sum()
+            logger.info("[CHECKPOINT] '%s' total_savings = %s", sn, total_savings)
+        else:
+            logger.warning("No 'Baseline Savings' col in '%s' for PPT summary", sn)
+
     try:
         if template_file_path and os.path.exists(template_file_path):
             prs = Presentation(template_file_path)

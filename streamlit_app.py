@@ -674,6 +674,10 @@ def main():
                                     as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                                     as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
                                     as_is_df.to_excel(writer, sheet_name='#As-Is', index=False)
+                                    if 'Baseline Savings' in as_is_df.columns:
+                                        logger.info("[CHECKPOINT] As-Is 'Baseline Savings' sample: %s", as_is_df['Baseline Savings'].head(5).tolist())
+                                    else:
+                                        logger.warning("As-Is DF has no 'Baseline Savings' column. Columns = %s", as_is_df.columns.tolist())
                                     logger.info("As-Is analysis completed.")
 
                                 # --- Best of Best Analysis ---
@@ -681,6 +685,8 @@ def main():
                                     best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                                     best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
                                     best_of_best_df.to_excel(writer, sheet_name='#Best of Best', index=False)
+                                    if 'Baseline Savings' in best_of_best_df.columns:
+                                         logger.info("[CHECKPOINT] Best-of-Best 'Baseline Savings' sample: %s", best_of_best_df['Baseline Savings'].head(5).tolist())
                                     logger.info("Best of Best analysis completed.")
 
                                 # --- Best of Best Excluding Suppliers Analysis ---
@@ -1408,6 +1414,12 @@ def main():
                                 scenario_dataframes = {}
                                 for sheet_name in scenario_sheet_names:
                                     df = pd.read_excel(scenario_excel_file, sheet_name=sheet_name)
+                                            # Log a sample of "Savings" to see if it changed after saving/reading.
+                                    if 'Baseline Savings' in df.columns:
+                                        logger.info("[CHECKPOINT] After re-reading '%s': 'Baseline Savings' sample: %s",
+                                                    sheet_name, df['Baseline Savings'].head(5).tolist())
+                                    else:
+                                        logger.warning("Sheet '%s' has no 'Baseline Savings' column. Columns = %s", sheet_name, df.columns.tolist())
                                     scenario_dataframes[sheet_name] = df
                                 scenario_sheets_loaded = True
                             except Exception as e:
@@ -1451,22 +1463,47 @@ def main():
                                         st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'. Skipping this sheet.")
                                         continue  # Skip this scenario
 
-                                    # Merge scenario_detail_grouping if required
+                                    # -----------------------------------------------------------------
+                                    # Merge scenario_detail_grouping if required (Option D approach):
+                                    # -----------------------------------------------------------------
                                     if scenario_detail_grouping and scenario_detail_grouping not in df.columns:
-                                        # Attempt to merge from original_df
+                                        # Attempt to pull grouping from original_df, but ensuring one row per Bid ID
                                         if original_df is not None and 'Bid ID' in original_df.columns:
                                             if scenario_detail_grouping in original_df.columns:
+                                                # 1) Make sure both have str Bid ID
                                                 df['Bid ID'] = df['Bid ID'].astype(str)
                                                 original_df['Bid ID'] = original_df['Bid ID'].astype(str)
-                                                df = df.merge(original_df[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
+                                                # 2) Build a unique_map from original_df to pick the FIRST non-blank grouping row
+                                                unique_map = (
+                                                    original_df.copy()
+                                                    .assign(
+                                                        _blank=lambda x: (
+                                                            x[scenario_detail_grouping].isna() 
+                                                            | (x[scenario_detail_grouping] == "")
+                                                        )
+                                                    )
+                                                    # Sort so that non-blanks (_blank=False) come first, blanks go last
+                                                    .sort_values("_blank")
+                                                    # Then group by Bid ID, keep only the first row
+                                                    .groupby("Bid ID", as_index=False)
+                                                    .first()
+                                                )
+                                                # 3) Merge that single row per Bid ID
+                                                df = df.merge(unique_map[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
                                                 if scenario_detail_grouping not in df.columns:
                                                     st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into '{sheet_name}'. Skipping this scenario.")
                                                     continue
                                             else:
-                                                st.warning(f"The selected grouping field '{scenario_detail_grouping}' is not in 'original_merged_data'. No detail slides will be created for '{sheet_name}'.")
+                                                st.warning(
+                                                    f"The selected grouping field '{scenario_detail_grouping}' is not in 'original_merged_data'. "
+                                                    "No detail slides will be created for this scenario."
+                                                )
                                                 # It's okay to proceed without details if user still wants scenario summary slides
                                         else:
-                                            st.warning("The 'original_merged_data' is not available or 'Bid ID' missing in 'original_merged_data'. Cannot merge grouping.")
+                                            st.warning(
+                                                "The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'. "
+                                                f"Cannot merge grouping for '{sheet_name}'."
+                                            )
                                             # We can still proceed without scenario details
 
                                     # Merge scenario_summary_selections if sub-summaries are on and the column not present
@@ -1477,14 +1514,27 @@ def main():
                                                 if scenario_summary_selections in original_df.columns:
                                                     df['Bid ID'] = df['Bid ID'].astype(str)
                                                     original_df['Bid ID'] = original_df['Bid ID'].astype(str)
-                                                    df = df.merge(original_df[['Bid ID', scenario_summary_selections]], on='Bid ID', how='left')
+                                                    df = df.merge(
+                                                        original_df[['Bid ID', scenario_summary_selections]], 
+                                                        on='Bid ID', 
+                                                        how='left'
+                                                    )
                                                     if scenario_summary_selections not in df.columns:
-                                                        st.warning(f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. Sub-summaries may not be created.")
+                                                        st.warning(
+                                                            f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. "
+                                                            "Sub-summaries may not be created."
+                                                        )
                                                 else:
-                                                    st.warning(f"The sub-summary field '{scenario_summary_selections}' is not in 'original_merged_data'. No sub-summaries for '{sheet_name}'.")
+                                                    st.warning(
+                                                        f"The sub-summary field '{scenario_summary_selections}' is not in 'original_merged_data'. "
+                                                        f"No sub-summaries for '{sheet_name}'."
+                                                    )
                                             else:
-                                                st.warning("The 'original_merged_data' is not available or 'Bid ID' missing for merging sub-summary selections.")
+                                                st.warning(
+                                                    "The 'original_merged_data' is not available or 'Bid ID' missing for merging sub-summary selections."
+                                                )
 
+                                    # Store in scenario_dataframes
                                     scenario_dataframes[sheet_name] = df
 
                                 if not scenario_dataframes:
@@ -1492,6 +1542,15 @@ def main():
                                     ppt_data = None  # Ensure ppt_data is set to None if generation fails
                                 else:
                                     # Generate the presentation (this now includes sub-summaries if toggled on)
+
+                                    for sn, df in scenario_dataframes.items():
+                                        if 'Baseline Savings' in df.columns:
+                                            logger.info("[CHECKPOINT] Pre-PPT '%s': 'Baseline Savings' sample: %s",
+                                                        sn, df['Baseline Savings'].head(5).tolist())
+                                        else:
+                                            logger.warning("[CHECKPOINT] Pre-PPT '%s' has no 'Baseline Savings' col. Columns: %s",
+                                                        sn, df.columns.tolist())
+
                                     prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
 
                                     if not prs:
@@ -1507,6 +1566,7 @@ def main():
                                 ppt_data = None  # Ensure ppt_data is set to None if generation fails
                         else:
                             ppt_data = None  # No presentations selected
+
 
 
 
