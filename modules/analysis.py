@@ -1620,6 +1620,7 @@ def run_customizable_analysis_processing(
                 f")"
                 f"), \"\")"
             )
+            formula_supplier_name.number_format = '@'
             scenario_reports_sheet[supplier_name_cell].value = formula_supplier_name
             logger.info(f"Assigned formula to {supplier_name_cell}: {formula_supplier_name}")
         except Exception as e:
