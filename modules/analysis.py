@@ -1613,7 +1613,7 @@ def run_customizable_analysis_processing(
             adj_group_range = limit_rows_in_column(adjusted_group_col,first_row=2, last_row=999)
  
             formula_supplier_name = (
-                f"=IFERROR(UNIQUE("
+                f"IFERROR(UNIQUE("
                 f"FILTER('Scenario Selector'!{adj_supplier_range},"
                 f"('Scenario Selector'!{adj_supplier_range}<>\"\") * "
                 f"('Scenario Selector'!{adj_group_range}={group_label_cell})"
