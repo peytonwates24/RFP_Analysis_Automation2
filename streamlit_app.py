@@ -491,7 +491,102 @@ def main():
                 # New Presentation Summaries multi-select
             presentation_options = ["Scenario Summary", "Bid Coverage Summary", "Supplier Comparison Summary"]
             selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
- 
+            
+            # --- Option to upload a Rebate/Discount Excel file ---
+            include_file = st.checkbox("Include Rebate/Discount Excel file to populate tables?", key="include_csv")
+            if include_file:
+                uploaded_file = st.file_uploader(
+                    "Upload Excel file with tabs 'rebates' and 'volume discounts'",
+                    type=["xlsx"],
+                    key="rebate_discount_file"
+                )
+                if uploaded_file is not None:
+                    try:
+                        excel_data = pd.ExcelFile(uploaded_file)
+                        # If a "rebates" sheet is found, load it into session state.
+                        if "rebates" in excel_data.sheet_names:
+                            rebates_csv_data = pd.read_excel(excel_data, sheet_name="rebates")
+                            st.session_state["rebates_data"] = rebates_csv_data
+                        else:
+                            st.warning("No 'rebates' sheet found in the uploaded file.")
+                        # If a "volume discounts" sheet is found, load it into session state.
+                        if "volume discounts" in excel_data.sheet_names:
+                            volume_discount_csv_data = pd.read_excel(excel_data, sheet_name="volume discounts")
+                            st.session_state["volume_discount_data"] = volume_discount_csv_data
+                        else:
+                            st.warning("No 'volume discounts' sheet found in the uploaded file.")
+                    except Exception as e:
+                        st.error(f"Error reading Excel file: {e}")
+
+            # --- Rebate Information Section ---
+            with st.expander("Rebate Information", expanded=False):
+                st.markdown("### Enter Rebate Details")
+                st.write("Provide rebate information for each supplier below. You can add rows as needed.")
+
+                # Define default rebate data.
+                default_rebate_data = pd.DataFrame({
+                    "Supplier Name": [""],
+                    "Minimum Volume": [0],
+                    "Max Volume": [0],
+                    "Rebate %": [0.0]
+                })
+
+                # Initialize session state for rebates_data only if it doesn't exist (or was not populated via file upload).
+                if "rebates_data" not in st.session_state:
+                    st.session_state["rebates_data"] = default_rebate_data
+
+                # Configure columns to enforce data types and formatting.
+                column_config = {
+                    "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                    "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
+                    "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
+                    "Rebate %": st.column_config.NumberColumn("Rebate %", min_value=0, format="%.2f%%")
+                }
+
+                # Display an editable table with dynamic row addition.
+                rebates_df = st.data_editor(
+                    st.session_state["rebates_data"],
+                    column_config=column_config,
+                    num_rows="dynamic",
+                    key="rebate_editor"
+                )
+                # Save any edits back to session state.
+                st.session_state["rebates_data"] = rebates_df
+
+            # --- Volume Discount Section ---
+            with st.expander("Volume Discount", expanded=False):
+                st.markdown("### Enter Volume Discount Details")
+                st.write("Provide volume discount information for each supplier below. You can add rows as needed.")
+
+                # Define default volume discount data.
+                default_volume_discount_data = pd.DataFrame({
+                    "Supplier Name": [""],
+                    "Minimum Volume": [0],
+                    "Max Volume": [0],
+                    "Volume Discount %": [0.0]
+                })
+
+                # Initialize session state for volume_discount_data only if it doesn't exist.
+                if "volume_discount_data" not in st.session_state:
+                    st.session_state["volume_discount_data"] = default_volume_discount_data
+
+                # Configure columns for volume discount data.
+                volume_discount_column_config = {
+                    "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                    "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
+                    "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
+                    "Volume Discount %": st.column_config.NumberColumn("Volume Discount %", min_value=0, format="%.2f%%")
+                }
+
+                # Display the editable table.
+                volume_discount_df = st.data_editor(
+                    st.session_state["volume_discount_data"],
+                    column_config=volume_discount_column_config,
+                    num_rows="dynamic",
+                    key="volume_discount_editor"
+                )
+                # Save any edits back to session state.
+                st.session_state["volume_discount_data"] = volume_discount_df
  
             # Exclusion rules for Best of Best Excluding Suppliers
             if "Best of Best Excluding Suppliers" in analyses_to_run:
