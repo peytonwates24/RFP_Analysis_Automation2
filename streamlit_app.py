@@ -503,9 +503,10 @@ def main():
             selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
             
 
-            # === Rebate Information Section ===
-            with st.expander("Rebate Information", expanded=False):
-                st.markdown("### Enter Rebate Details")
+            # === Conditions Section (Rebates and Volume Discounts Together) ===
+            with st.expander("Conditions", expanded=False):
+                # --- Rebate Information ---
+                st.markdown("### Rebate Information")
                 st.write("Provide rebate information for each supplier below. You can add rows as needed.")
 
                 # Define default rebate data.
@@ -535,12 +536,12 @@ def main():
                     num_rows="dynamic",
                     key="rebate_editor"
                 )
-                # Save any changes back to session state.
                 st.session_state["rebates_data"] = rebates_df
 
-            # === Volume Discount Section ===
-            with st.expander("Volume Discount", expanded=False):
-                st.markdown("### Enter Volume Discount Details")
+                st.markdown("---")  # Visual divider between sections
+
+                # --- Volume Discount Information ---
+                st.markdown("### Volume Discount")
                 st.write("Provide volume discount information for each supplier below. You can add rows as needed.")
 
                 # Define default volume discount data.
@@ -555,7 +556,7 @@ def main():
                 if "volume_discount_data" not in st.session_state:
                     st.session_state["volume_discount_data"] = default_volume_discount_data
 
-                # Configure columns to enforce data types and formatting.
+                # Configure columns for volume discount.
                 volume_discount_column_config = {
                     "Supplier Name": st.column_config.TextColumn("Supplier Name"),
                     "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
@@ -570,9 +571,146 @@ def main():
                     num_rows="dynamic",
                     key="volume_discount_editor"
                 )
-                # Save any changes back to session state.
                 st.session_state["volume_discount_data"] = volume_discount_df
  
+            with st.expander("Constraints", expanded=False):
+                st.markdown("### Analysis Constraints")
+                st.write("Define optional constraints for the analysis below. Each constraint is inactive unless enabled.")
+
+                # Retrieve Bid ID options from merged data.
+                if "merged_data" in st.session_state and "Bid ID" in st.session_state.merged_data.columns:
+                    bid_options = st.session_state.merged_data["Bid ID"].dropna().unique().tolist()
+                else:
+                    bid_options = []
+
+                # Retrieve supplier options from the mapped "Supplier Name" column.
+                if (
+                    "merged_data" in st.session_state 
+                    and "column_mapping" in st.session_state 
+                    and st.session_state.column_mapping.get("Supplier Name")
+                ):
+                    mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
+                    supplier_options = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
+                else:
+                    supplier_options = []
+
+                # 1. Maximum Suppliers Constraint
+                if st.checkbox("Enable maximum suppliers constraint", key="enable_max_suppliers"):
+                    default_max = len(supplier_options) if supplier_options else 1
+                    max_suppliers = st.number_input(
+                        "Maximum number of suppliers awarded across all bid IDs",
+                        min_value=1,
+                        value=default_max,
+                        step=1,
+                        key="max_suppliers"
+                    )
+
+                # 2. Minimum Supplier Capacity Constraint
+                if st.checkbox("Enable minimum supplier capacity constraint", key="enable_supplier_capacity"):
+                    st.markdown("#### Minimum Supplier Capacity")
+                    st.write("Enter each supplier's capacity (volume) and list the applicable Bid IDs. If multiple Bid IDs apply, separate them with commas.")
+                    capacity_column_config = {
+                        "Supplier Name": st.column_config.SelectboxColumn("Supplier Name", options=supplier_options),
+                        "Capacity": st.column_config.NumberColumn("Capacity", min_value=0, step=1),
+                        # Use a text column with a help message for multiple Bid IDs.
+                        "Applicable Bid IDs": st.column_config.TextColumn("Applicable Bid IDs", help="Enter one or more Bid IDs separated by commas")
+                    }
+                    default_supplier_capacity = pd.DataFrame({
+                        "Supplier Name": [supplier_options[0] if supplier_options else ""],
+                        "Capacity": [0],
+                        "Applicable Bid IDs": [""]
+                    })
+                    supplier_capacity_df = st.data_editor(
+                        default_supplier_capacity,
+                        column_config=capacity_column_config,
+                        num_rows="dynamic",
+                        key="supplier_capacity_editor"
+                    )
+
+                # 3. Maximum Transitions Constraint
+                if st.checkbox("Enable maximum transitions constraint", key="enable_max_transitions"):
+                    max_transitions = st.number_input(
+                        "Maximum transitions from incumbent to new awarded supplier",
+                        min_value=0,
+                        value=0,
+                        step=1,
+                        key="max_transitions"
+                    )
+
+                # 4. Lock In Supplier Constraint
+                if st.checkbox("Enable lock in supplier constraint", key="enable_lock_in"):
+                    st.markdown("#### Lock In Supplier")
+                    st.write("Specify the Bid IDs that must be awarded to a specific supplier. These Bid IDs will be forced to use the designated supplier in the analysis.")
+                    lock_in_column_config = {
+                        "Bid ID": st.column_config.SelectboxColumn("Bid ID", options=bid_options),
+                        "Locked Supplier": st.column_config.SelectboxColumn("Locked Supplier", options=supplier_options)
+                    }
+                    default_lock_in = pd.DataFrame({
+                        "Bid ID": [bid_options[0] if bid_options else ""],
+                        "Locked Supplier": [supplier_options[0] if supplier_options else ""]
+                    })
+                    lock_in_df = st.data_editor(
+                        default_lock_in,
+                        column_config=lock_in_column_config,
+                        num_rows="dynamic",
+                        key="lock_in_editor"
+                    )
+
+                # 5. Exclude Suppliers Constraint
+                if st.checkbox("Enable supplier exclusion constraint", key="enable_exclusions"):
+                    st.markdown("#### Exclude Suppliers")
+                    global_exclusions = st.multiselect(
+                        "Exclude these suppliers from all bid IDs",
+                        options=supplier_options,
+                        key="global_exclusions"
+                    )
+                    st.write("Alternatively, specify per-Bid ID exclusions below:")
+                    exclusions_column_config = {
+                        "Bid ID": st.column_config.SelectboxColumn("Bid ID", options=bid_options),
+                        "Excluded Supplier": st.column_config.SelectboxColumn("Excluded Supplier", options=supplier_options, help="Select a supplier to exclude")
+                    }
+                    default_exclusions = pd.DataFrame({
+                        "Bid ID": [bid_options[0] if bid_options else ""],
+                        "Excluded Supplier": [supplier_options[0] if supplier_options else ""]
+                    })
+                    exclusions_df = st.data_editor(
+                        default_exclusions,
+                        column_config=exclusions_column_config,
+                        num_rows="dynamic",
+                        key="exclusions_editor"
+                    )
+
+                # 6. Splitting Awarded Supplier Constraint
+                allow_splitting = st.checkbox(
+                    "Enable splitting of awarded supplier for a bid ID across multiple suppliers",
+                    key="allow_splitting"
+                )
+                if allow_splitting:
+                    st.write("Specify the split details. Additional columns for extra suppliers are provided as dropdowns.")
+                    split_column_config = {
+                        "Bid ID": st.column_config.SelectboxColumn("Bid ID", options=bid_options),
+                        "Supplier 1": st.column_config.SelectboxColumn("Supplier 1", options=supplier_options),
+                        "Supplier 2": st.column_config.SelectboxColumn("Supplier 2", options=supplier_options),
+                        "Supplier 3": st.column_config.SelectboxColumn("Supplier 3", options=supplier_options),
+                        "Supplier 4": st.column_config.SelectboxColumn("Supplier 4", options=supplier_options),
+                        "Supplier 5": st.column_config.SelectboxColumn("Supplier 5", options=supplier_options)
+                    }
+                    default_split = pd.DataFrame({
+                        "Bid ID": [bid_options[0] if bid_options else ""],
+                        "Supplier 1": [supplier_options[0] if supplier_options else ""],
+                        "Supplier 2": [supplier_options[0] if supplier_options else ""],
+                        "Supplier 3": [supplier_options[0] if supplier_options else ""],
+                        "Supplier 4": [supplier_options[0] if supplier_options else ""],
+                        "Supplier 5": [supplier_options[0] if supplier_options else ""]
+                    })
+                    split_df = st.data_editor(
+                        default_split,
+                        column_config=split_column_config,
+                        num_rows="dynamic",
+                        key="split_editor"
+                    )
+
+
             # Exclusion rules for Best of Best Excluding Suppliers
             if "Best of Best Excluding Suppliers" in analyses_to_run:
                 with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
