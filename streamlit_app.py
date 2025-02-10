@@ -353,11 +353,13 @@ def main():
  
         else:
             # For Merged Data input method
+            # === Merged Data Upload Section ===
             st.header("Upload Merged Data File")
             merged_file = st.file_uploader("Upload Merged Data File", type=["xlsx"], key='merged_data_file')
             merged_sheet = None
             if merged_file:
                 try:
+                    # Read the merged data file and extract sheet names.
                     excel_merged = pd.ExcelFile(merged_file, engine='openpyxl')
                     merged_sheet = st.selectbox(
                         "Select Sheet",
@@ -366,22 +368,30 @@ def main():
                     )
                 except Exception as e:
                     st.error(f"Error reading merged data file: {e}")
-                    logger.error(f"Error reading merged data file: {e}")
- 
+
             if merged_file and merged_sheet:
                 try:
                     merged_data = pd.read_excel(merged_file, sheet_name=merged_sheet, engine='openpyxl')
-                    # Normalize columns
+                    # Optionally normalize columns using your existing function.
                     merged_data = normalize_columns(merged_data)
                     st.session_state.merged_data = merged_data
                     st.session_state.original_merged_data = merged_data.copy()
                     st.session_state.columns = list(merged_data.columns)
- 
                     st.success("Merged data loaded successfully. Please map the columns for analysis.")
-                    logger.info("Merged data loaded successfully.")
+
+                    # --- Populate Rebate and Volume Discount Data from the merged file ---
+                    if "rebates" in excel_merged.sheet_names:
+                        st.session_state["rebates_data"] = pd.read_excel(merged_file, sheet_name="rebates", engine='openpyxl')
+                    else:
+                        st.warning("No 'rebates' tab found in the merged data file; default rebate data will be used.")
+
+                    if "volume discounts" in excel_merged.sheet_names:
+                        st.session_state["volume_discount_data"] = pd.read_excel(merged_file, sheet_name="volume discounts", engine='openpyxl')
+                    else:
+                        st.warning("No 'volume discounts' tab found in the merged data file; default volume discount data will be used.")
+
                 except Exception as e:
                     st.error(f"Error loading merged data: {e}")
-                    logger.error(f"Error loading merged data: {e}")
  
         if st.session_state.merged_data is not None:
  
@@ -492,33 +502,8 @@ def main():
             presentation_options = ["Scenario Summary", "Bid Coverage Summary", "Supplier Comparison Summary"]
             selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
             
-            # --- Option to upload a Rebate/Discount Excel file ---
-            include_file = st.checkbox("Include Rebate/Discount Excel file to populate tables?", key="include_csv")
-            if include_file:
-                uploaded_file = st.file_uploader(
-                    "Upload Excel file with tabs 'rebates' and 'volume discounts'",
-                    type=["xlsx"],
-                    key="rebate_discount_file"
-                )
-                if uploaded_file is not None:
-                    try:
-                        excel_data = pd.ExcelFile(uploaded_file)
-                        # If a "rebates" sheet is found, load it into session state.
-                        if "rebates" in excel_data.sheet_names:
-                            rebates_csv_data = pd.read_excel(excel_data, sheet_name="rebates")
-                            st.session_state["rebates_data"] = rebates_csv_data
-                        else:
-                            st.warning("No 'rebates' sheet found in the uploaded file.")
-                        # If a "volume discounts" sheet is found, load it into session state.
-                        if "volume discounts" in excel_data.sheet_names:
-                            volume_discount_csv_data = pd.read_excel(excel_data, sheet_name="volume discounts")
-                            st.session_state["volume_discount_data"] = volume_discount_csv_data
-                        else:
-                            st.warning("No 'volume discounts' sheet found in the uploaded file.")
-                    except Exception as e:
-                        st.error(f"Error reading Excel file: {e}")
 
-            # --- Rebate Information Section ---
+            # === Rebate Information Section ===
             with st.expander("Rebate Information", expanded=False):
                 st.markdown("### Enter Rebate Details")
                 st.write("Provide rebate information for each supplier below. You can add rows as needed.")
@@ -531,29 +516,29 @@ def main():
                     "Rebate %": [0.0]
                 })
 
-                # Initialize session state for rebates_data only if it doesn't exist (or was not populated via file upload).
+                # Initialize session state for rebates_data if not already present.
                 if "rebates_data" not in st.session_state:
                     st.session_state["rebates_data"] = default_rebate_data
 
                 # Configure columns to enforce data types and formatting.
-                column_config = {
+                rebate_column_config = {
                     "Supplier Name": st.column_config.TextColumn("Supplier Name"),
                     "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
                     "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
                     "Rebate %": st.column_config.NumberColumn("Rebate %", min_value=0, format="%.2f%%")
                 }
 
-                # Display an editable table with dynamic row addition.
+                # Display an editable table that allows dynamic row addition.
                 rebates_df = st.data_editor(
                     st.session_state["rebates_data"],
-                    column_config=column_config,
+                    column_config=rebate_column_config,
                     num_rows="dynamic",
                     key="rebate_editor"
                 )
-                # Save any edits back to session state.
+                # Save any changes back to session state.
                 st.session_state["rebates_data"] = rebates_df
 
-            # --- Volume Discount Section ---
+            # === Volume Discount Section ===
             with st.expander("Volume Discount", expanded=False):
                 st.markdown("### Enter Volume Discount Details")
                 st.write("Provide volume discount information for each supplier below. You can add rows as needed.")
@@ -566,11 +551,11 @@ def main():
                     "Volume Discount %": [0.0]
                 })
 
-                # Initialize session state for volume_discount_data only if it doesn't exist.
+                # Initialize session state for volume_discount_data if not already present.
                 if "volume_discount_data" not in st.session_state:
                     st.session_state["volume_discount_data"] = default_volume_discount_data
 
-                # Configure columns for volume discount data.
+                # Configure columns to enforce data types and formatting.
                 volume_discount_column_config = {
                     "Supplier Name": st.column_config.TextColumn("Supplier Name"),
                     "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
@@ -585,7 +570,7 @@ def main():
                     num_rows="dynamic",
                     key="volume_discount_editor"
                 )
-                # Save any edits back to session state.
+                # Save any changes back to session state.
                 st.session_state["volume_discount_data"] = volume_discount_df
  
             # Exclusion rules for Best of Best Excluding Suppliers
