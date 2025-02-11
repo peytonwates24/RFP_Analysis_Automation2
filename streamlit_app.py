@@ -660,6 +660,7 @@ def main():
                     st.session_state["supplier_contractual_discount_data"] = supplier_discount_df
 
  
+            # ----- Constraints Section -----
             with st.expander("Constraints", expanded=False):
                 st.markdown("### Analysis Constraints")
                 st.write("Define optional constraints for the analysis below. Each constraint is inactive unless enabled.")
@@ -692,10 +693,10 @@ def main():
                         key="max_suppliers"
                     )
 
-                # 2. Minimum Supplier Capacity Constraint
-                if st.checkbox("Enable minimum supplier capacity constraint", key="enable_supplier_capacity"):
-                    st.markdown("#### Minimum Supplier Capacity")
-                    st.write("Enter each supplier's capacity (volume) and list the applicable Bid IDs. If multiple Bid IDs apply, separate them with commas.")
+                # 2. Supplier Volume Allocation Constraint
+                if st.checkbox("Enable supplier volume allocation constraint", key="enable_supplier_capacity"):
+                    st.markdown("#### Supplier Volume Allocation Constraint")
+                    st.write("Enter each supplier's volume allocation and list the applicable Bid IDs. If multiple Bid IDs apply, separate them with commas.")
                     capacity_column_config = {
                         "Supplier Name": st.column_config.SelectboxColumn("Supplier Name", options=supplier_options),
                         "Capacity": st.column_config.NumberColumn("Capacity", min_value=0, step=1),
@@ -796,6 +797,7 @@ def main():
                         num_rows="dynamic",
                         key="split_editor"
                     )
+
 
 
             # Exclusion rules for Best of Best Excluding Suppliers
