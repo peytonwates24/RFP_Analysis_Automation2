@@ -355,23 +355,23 @@ def main():
             # For Merged Data input method
             # === Merged Data Upload Section ===
             st.header("Upload Merged Data File")
-            merged_file = st.file_uploader("Upload Merged Data File", type=["xlsx"], key='merged_data_file')
+            merged_file = st.file_uploader("Upload Merged Data File", type=["xlsx"], key="merged_data_file")
             merged_sheet = None
             if merged_file:
                 try:
                     # Read the merged data file and extract sheet names.
-                    excel_merged = pd.ExcelFile(merged_file, engine='openpyxl')
+                    excel_merged = pd.ExcelFile(merged_file, engine="openpyxl")
                     merged_sheet = st.selectbox(
                         "Select Sheet",
                         excel_merged.sheet_names,
-                        key='merged_sheet_selection'
+                        key="merged_sheet_selection"
                     )
                 except Exception as e:
                     st.error(f"Error reading merged data file: {e}")
 
             if merged_file and merged_sheet:
                 try:
-                    merged_data = pd.read_excel(merged_file, sheet_name=merged_sheet, engine='openpyxl')
+                    merged_data = pd.read_excel(merged_file, sheet_name=merged_sheet, engine="openpyxl")
                     # Optionally normalize columns using your existing function.
                     merged_data = normalize_columns(merged_data)
                     st.session_state.merged_data = merged_data
@@ -379,19 +379,31 @@ def main():
                     st.session_state.columns = list(merged_data.columns)
                     st.success("Merged data loaded successfully. Please map the columns for analysis.")
 
-                    # --- Populate Rebate and Volume Discount Data from the merged file ---
+                    # --- Populate Rebate Data from the merged file ---
                     if "rebates" in excel_merged.sheet_names:
-                        st.session_state["rebates_data"] = pd.read_excel(merged_file, sheet_name="rebates", engine='openpyxl')
+                        st.session_state["rebates_data"] = pd.read_excel(merged_file, sheet_name="rebates", engine="openpyxl")
                     else:
                         st.warning("No 'rebates' tab found in the merged data file; default rebate data will be used.")
 
-                    if "volume discounts" in excel_merged.sheet_names:
-                        st.session_state["volume_discount_data"] = pd.read_excel(merged_file, sheet_name="volume discounts", engine='openpyxl')
+                    # --- Populate Supplier Contractual Discount Data from the merged file ---
+                    # Look for a sheet named "contract discounts" (case-insensitive, trimmed)
+                    contract_discount_sheet = None
+                    for sheet in excel_merged.sheet_names:
+                        if sheet.strip().lower() == "contract discounts":
+                            contract_discount_sheet = sheet
+                            break
+
+                    if contract_discount_sheet is not None:
+                        st.session_state["supplier_contractual_discount_data"] = pd.read_excel(
+                            merged_file, sheet_name=contract_discount_sheet, engine="openpyxl"
+                        )
                     else:
-                        st.warning("No 'volume discounts' tab found in the merged data file; default volume discount data will be used.")
+                        st.warning("No 'contract discounts' tab found in the merged data file; default contractual discount data will be used.")
 
                 except Exception as e:
                     st.error(f"Error loading merged data: {e}")
+
+
  
         if st.session_state.merged_data is not None:
  
@@ -505,73 +517,148 @@ def main():
 
             # === Conditions Section (Rebates and Volume Discounts Together) ===
             with st.expander("Conditions", expanded=False):
-                # --- Rebate Information ---
-                st.markdown("### Rebate Information")
-                st.write("Provide rebate information for each supplier below. You can add rows as needed.")
-
-                # Define default rebate data.
-                default_rebate_data = pd.DataFrame({
-                    "Supplier Name": [""],
-                    "Minimum Volume": [0],
-                    "Max Volume": [0],
-                    "Rebate %": [0.0]
-                })
-
-                # Initialize session state for rebates_data if not already present.
-                if "rebates_data" not in st.session_state:
-                    st.session_state["rebates_data"] = default_rebate_data
-
-                # Configure columns to enforce data types and formatting.
-                rebate_column_config = {
-                    "Supplier Name": st.column_config.TextColumn("Supplier Name"),
-                    "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
-                    "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
-                    "Rebate %": st.column_config.NumberColumn("Rebate %", min_value=0, format="%.2f%%")
-                }
-
-                # Display an editable table that allows dynamic row addition.
-                rebates_df = st.data_editor(
-                    st.session_state["rebates_data"],
-                    column_config=rebate_column_config,
-                    num_rows="dynamic",
-                    key="rebate_editor"
+                st.markdown("### Conditions")
+                st.write(
+                    "Define optional conditions to be applied in the analysis. "
+                    "Check a box to enable a condition. If data from the merged file exists, it will auto-populate."
                 )
-                st.session_state["rebates_data"] = rebates_df
 
-                st.markdown("---")  # Visual divider between sections
+                # Retrieve supplier options from the mapped supplier column.
+                if (
+                    "merged_data" in st.session_state
+                    and "column_mapping" in st.session_state
+                    and st.session_state.column_mapping.get("Supplier Name")
+                ):
+                    mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
+                    # Convert all supplier names to strings.
+                    supplier_options_raw = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
+                    supplier_options = [str(s) for s in supplier_options_raw]
+                else:
+                    supplier_options = []
 
-                # --- Volume Discount Information ---
-                st.markdown("### Volume Discount")
-                st.write("Provide volume discount information for each supplier below. You can add rows as needed.")
+                # ----- Rebate Condition with Dynamic Columns -----
+                if st.checkbox("Enable Rebate Condition", key="enable_rebate_condition"):
+                    st.markdown("#### Rebate Information")
+                    st.write("Review the rebate information. You can add rows as needed.")
 
-                # Define default volume discount data.
-                default_volume_discount_data = pd.DataFrame({
-                    "Supplier Name": [""],
-                    "Minimum Volume": [0],
-                    "Max Volume": [0],
-                    "Volume Discount %": [0.0]
-                })
+                    # Place the two radio buttons side-by-side.
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        rebate_measurement = st.radio(
+                            "Rebate Measurement Type",
+                            options=["Volume-based", "Spend-based"],
+                            index=0,
+                            key="rebate_measurement"
+                        )
+                    with col2:
+                        rebate_unit = st.radio(
+                            "Rebate Unit",
+                            options=["Percentage", "Dollar Amount"],
+                            index=0,
+                            key="rebate_unit"
+                        )
 
-                # Initialize session state for volume_discount_data if not already present.
-                if "volume_discount_data" not in st.session_state:
-                    st.session_state["volume_discount_data"] = default_volume_discount_data
+                    # Define default data and column configuration based on the selections.
+                    if rebate_measurement == "Volume-based":
+                        if rebate_unit == "Percentage":
+                            default_rebate_data = pd.DataFrame({
+                                "Supplier Name": [str(supplier_options[0]) if supplier_options else ""],
+                                "Minimum Volume": [0],
+                                "Max Volume": [0],
+                                "Rebate %": [0.0]
+                            })
+                            rebate_column_config = {
+                                "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                                "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
+                                "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
+                                "Rebate %": st.column_config.NumberColumn("Rebate %", min_value=0, format="%.2f%%")
+                            }
+                        else:  # Dollar Amount
+                            default_rebate_data = pd.DataFrame({
+                                "Supplier Name": [str(supplier_options[0]) if supplier_options else ""],
+                                "Minimum Volume": [0],
+                                "Max Volume": [0],
+                                "Rebate $": [0.0]
+                            })
+                            rebate_column_config = {
+                                "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                                "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
+                                "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
+                                "Rebate $": st.column_config.NumberColumn("Rebate $", min_value=0, format="$%.2f")
+                            }
+                    else:  # Spend-based
+                        if rebate_unit == "Percentage":
+                            default_rebate_data = pd.DataFrame({
+                                "Supplier Name": [str(supplier_options[0]) if supplier_options else ""],
+                                "Minimum Spend": [0],
+                                "Max Spend": [0],
+                                "Rebate %": [0.0]
+                            })
+                            rebate_column_config = {
+                                "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                                "Minimum Spend": st.column_config.NumberColumn("Minimum Spend", min_value=0, step=1),
+                                "Max Spend": st.column_config.NumberColumn("Max Spend", min_value=0, step=1),
+                                "Rebate %": st.column_config.NumberColumn("Rebate %", min_value=0, format="%.2f%%")
+                            }
+                        else:  # Dollar Amount
+                            default_rebate_data = pd.DataFrame({
+                                "Supplier Name": [str(supplier_options[0]) if supplier_options else ""],
+                                "Minimum Spend": [0],
+                                "Max Spend": [0],
+                                "Rebate $": [0.0]
+                            })
+                            rebate_column_config = {
+                                "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                                "Minimum Spend": st.column_config.NumberColumn("Minimum Spend", min_value=0, step=1),
+                                "Max Spend": st.column_config.NumberColumn("Max Spend", min_value=0, step=1),
+                                "Rebate $": st.column_config.NumberColumn("Rebate $", min_value=0, format="$%.2f")
+                            }
+                    
+                    # Check if the current configuration has changed; if so, reinitialize the rebate data.
+                    new_config = (rebate_measurement, rebate_unit)
+                    if st.session_state.get("rebate_config") != new_config:
+                        st.session_state["rebates_data"] = default_rebate_data.copy()
+                        st.session_state["rebate_config"] = new_config
 
-                # Configure columns for volume discount.
-                volume_discount_column_config = {
-                    "Supplier Name": st.column_config.TextColumn("Supplier Name"),
-                    "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
-                    "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
-                    "Volume Discount %": st.column_config.NumberColumn("Volume Discount %", min_value=0, format="%.2f%%")
-                }
+                    # Use a dynamic key that incorporates the radio selections.
+                    editor_key = f"rebate_editor_{rebate_measurement}_{rebate_unit}"
+                    
+                    rebates_df = st.data_editor(
+                        st.session_state["rebates_data"],
+                        column_config=rebate_column_config,
+                        num_rows="dynamic",
+                        key=editor_key
+                    )
+                    st.session_state["rebates_data"] = rebates_df
 
-                # Display the editable table.
-                volume_discount_df = st.data_editor(
-                    st.session_state["volume_discount_data"],
-                    column_config=volume_discount_column_config,
-                    num_rows="dynamic",
-                    key="volume_discount_editor"
-                )
-                st.session_state["volume_discount_data"] = volume_discount_df
+                # ----- Supplier Contractual Discount Condition -----
+                if st.checkbox("Enable Supplier Contractual Discount Condition", key="enable_supplier_contractual_discount_condition"):
+                    st.markdown("#### Supplier Contractual Discount")
+                    st.write("Review the supplier contractual discount information. You can add rows as needed.")
+                    default_supplier_discount_data = pd.DataFrame({
+                        "Supplier Name": [""],  # Here you may prepopulate with a value if desired
+                        "Minimum Volume": [0],
+                        "Max Volume": [0],
+                        "Supplier Contractual Discount %": [0.0]
+                    })
+                    # If data was successfully loaded from the merged file, use it; otherwise, use default.
+                    if "supplier_contractual_discount_data" not in st.session_state:
+                        st.session_state["supplier_contractual_discount_data"] = default_supplier_discount_data
+
+                    supplier_discount_column_config = {
+                        "Supplier Name": st.column_config.TextColumn("Supplier Name"),
+                        "Minimum Volume": st.column_config.NumberColumn("Minimum Volume", min_value=0, step=1),
+                        "Max Volume": st.column_config.NumberColumn("Max Volume", min_value=0, step=1),
+                        "Supplier Contractual Discount %": st.column_config.NumberColumn("Supplier Contractual Discount %", min_value=0, format="%.2f%%")
+                    }
+                    supplier_discount_df = st.data_editor(
+                        st.session_state["supplier_contractual_discount_data"],
+                        column_config=supplier_discount_column_config,
+                        num_rows="dynamic",
+                        key="supplier_contractual_discount_editor"
+                    )
+                    st.session_state["supplier_contractual_discount_data"] = supplier_discount_df
+
  
             with st.expander("Constraints", expanded=False):
                 st.markdown("### Analysis Constraints")
