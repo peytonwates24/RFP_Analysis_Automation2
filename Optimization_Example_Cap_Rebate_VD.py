@@ -15,8 +15,8 @@ price = {('A', 'item1'): 50,
          ('B', 'item2'): 80}
 
 # Supplier capacities: maximum units that can be supplied for each item.
-capacity = {('A', 'item1'): 50000,
-            ('A', 'item2'): 40000,
+capacity = {('A', 'item1'): 500,
+            ('A', 'item2'): 400,
             ('B', 'item1'): 40000,
             ('B', 'item2'): 30000}
 
