@@ -84,7 +84,7 @@ default_global_capacity = {
     for idx, row in default_global_capacity_df.iterrows()
 }
 
-# For big‑M values, we compute U_volume and U_spend from per‑item capacity.
+# For big‑M values, compute U_volume and U_spend from per‑item capacity.
 def compute_U_volume(per_item_cap):
     total = {}
     for s in suppliers:
@@ -115,16 +115,19 @@ epsilon = 1e-6
 # OPTIMIZATION MODEL FUNCTION
 #############################################
 def run_optimization(use_global, capacity_data, demand_data, item_attr_data, price_data,
-                     rebate_tiers, discount_tiers, baseline_price_data):
+                     rebate_tiers, discount_tiers, baseline_price_data, rules=[]):
     """
-    Runs the optimization model with multi-tier rebates and volume discounts (with optional scope).
-    Dynamically builds the list of items from the demand_data.
+    Runs the optimization model with multi-tier rebates and volume discounts (with optional scope)
+    and adds custom rule constraints.
+    Dynamically builds the list of items from demand_data.
+    Each rule is a dict with keys: rule_type, rule_input, operator, grouping, grouping_scope, supplier_scope.
+    Currently supports rule type "% of Volume Awarded".
     Returns (output_file, feasibility_notes, model_status).
     """
-    # Dynamically build the list of items from the demand dictionary.
+    # Build items list from demand_data keys.
     items_dynamic = list(demand_data.keys())
     
-    U_volume = default_U_volume   # For big‑M constraints.
+    U_volume = default_U_volume
     U_spend = default_U_spend
 
     lp_problem = pulp.LpProblem("Sourcing_with_MultiTier_Rebates_Discounts", pulp.LpMinimize)
@@ -135,7 +138,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
         for j in items_dynamic:
             x[(s, j)] = pulp.LpVariable(f"x_{s}_{j}", lowBound=0, cat='Continuous')
 
-    # For each supplier: Base spend S0[s] and Effective spend S[s].
+    # For each supplier: Base Spend S0[s] and Effective Spend S[s].
     S0 = {}
     S = {}
     for s in suppliers:
@@ -242,12 +245,36 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
             lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate*(1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
             lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate*(1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
 
-    # (Custom constraint removed)
-
+    # 7. Add Custom Rule Constraints.
+    for r_idx, rule in enumerate(rules):
+        if rule["rule_type"] == "% of Volume Awarded":
+            supplier_scope = rule["supplier_scope"]
+            grouping = rule["grouping"]
+            # If grouping is "All", rule applies across all items.
+            if grouping == "All":
+                items_group = items_dynamic
+            else:
+                grouping_scope = rule["grouping_scope"]
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(grouping, "")).strip() == str(grouping_scope).strip()]
+            try:
+                percentage = float(rule["rule_input"]) / 100.0
+            except:
+                continue  # Skip invalid rule.
+            operator = rule["operator"]
+            total_vol = pulp.lpSum(x[(s, j)] for s in suppliers for j in items_group)
+            # For this rule type, supplier_scope is a single supplier.
+            if operator == "At least":
+                lp_problem += pulp.lpSum(x[(supplier_scope, j)] for j in items_group) >= percentage * total_vol, f"Rule_{r_idx}"
+            elif operator == "At most":
+                lp_problem += pulp.lpSum(x[(supplier_scope, j)] for j in items_group) <= percentage * total_vol, f"Rule_{r_idx}"
+            elif operator == "Exactly":
+                lp_problem += pulp.lpSum(x[(supplier_scope, j)] for j in items_group) == percentage * total_vol, f"Rule_{r_idx}"
+    
     lp_problem.solve()
     model_status = pulp.LpStatus[lp_problem.status]
 
     # Build feasibility notes.
+    items_dynamic = list(demand_data.keys())
     feasibility_notes = ""
     if model_status == "Infeasible":
         feasibility_notes += "Model is infeasible. Possible causes:\n"
@@ -264,11 +291,10 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
         feasibility_notes = "Model is optimal."
 
     #############################################
-    # Build Excel Output (Results & Feasibility Notes)
+    # Build Excel Output (Results, Feasibility Notes, and Rules Summary)
     #############################################
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    # For each item, output one row per supplier awarded a positive volume.
     for idx, j in enumerate(items_dynamic, start=1):
         awarded_list = []
         for s in suppliers:
@@ -304,7 +330,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 if pulp.value(y_rebate[s][k]) is not None and pulp.value(y_rebate[s][k]) >= 0.5:
                     active_rebate = tier[2]
                     break
-            # Rebate Savings calculated directly from the awarded spend.
             rebate_savings = awarded_spend * active_rebate
             facility_val = item_attr_data[j].get("Facility", "")
             row = {
@@ -343,6 +368,18 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     
     df_feasibility = pd.DataFrame({"Feasibility Notes": [feasibility_notes]})
     
+    # Build Rules Summary in plain language.
+    def rule_to_text(rule):
+        # If grouping is "All", omit grouping scope.
+        if rule["grouping"] == "All":
+            grouping_text = "all items"
+        else:
+            grouping_text = rule["grouping_scope"]
+        supplier_text = f"Supplier {rule['supplier_scope']}"
+        return f"{rule['operator']} {rule['rule_input']}% of {grouping_text} volume awarded to {supplier_text}"
+    rules_summary = [rule_to_text(r) for r in rules]
+    df_rules = pd.DataFrame({"Rules Summary": rules_summary})
+    
     home_dir = os.path.expanduser("~")
     downloads_folder = os.path.join(home_dir, "Downloads")
     output_file = os.path.join(downloads_folder, "optimization_results.xlsx")
@@ -350,6 +387,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df_results.to_excel(writer, sheet_name="Results", index=False)
         df_feasibility.to_excel(writer, sheet_name="Feasibility Notes", index=False)
+        df_rules.to_excel(writer, sheet_name="Rules Summary", index=False)
     
     return output_file, feasibility_notes, model_status
 
@@ -358,7 +396,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
 #############################################
 
 # Create sample Excel files for download.
-# For Global Capacity, include only the Global Capacity table; for Per Item, include only that table.
 df_global_capacity = default_global_capacity_df.copy()
 df_per_item_capacity = pd.DataFrame([
     {"Supplier Name": s, "Item": j, "Capacity": default_per_item_capacity.get((s, j), None)}
@@ -374,7 +411,6 @@ df_price = pd.DataFrame([
     {"Supplier Name": s, "Item": j, "Price": default_price.get((s, j), None)}
     for s in suppliers for j in default_demand.keys()
 ])
-# For multi-tier structures, output the tiers in a simplified table.
 df_rebate = pd.DataFrame([
     {"Supplier Name": s, "Tier": k+1, "Min Volume": tier[0], "Max Volume": tier[1], "Rebate Percentage": tier[2],
      "Scope Attribute": tier[3] if tier[3] is not None else "", "Scope Value": tier[4] if tier[4] is not None else ""}
@@ -390,28 +426,61 @@ df_baseline = pd.DataFrame([
 ])
 
 layout = [
-    [sg.Text("Upload Excel File (Optional):"), sg.Input(key="-FILE-"), sg.FileBrowse(file_types=(("Excel Files", "*.xlsx"),))],
+    [sg.Text("Select Data Source:")],
+    [sg.Radio("Example Data", "DATA_SOURCE", key="-EXAMPLE-", default=True),
+     sg.Radio("Excel Upload", "DATA_SOURCE", key="-UPLOAD-")],
     [sg.Text("Select Capacity Input Type:")],
     [sg.Radio("Global Capacity", "CAP_TYPE", key="-GLOBAL-", default=True),
      sg.Radio("Per Item Capacity", "CAP_TYPE", key="-PERITEM-")],
-    [sg.Text("Select Data Tab for Capacity:"), sg.Combo(values=[], key="-CAPTAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Demand:"), sg.Combo(values=[], key="-DEMTAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Item Attributes:"), sg.Combo(values=[], key="-ITEMTAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Price:"), sg.Combo(values=[], key="-PRICETAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Rebate Structure:"), sg.Combo(values=[], key="-REBATTAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Discount Structure:"), sg.Combo(values=[], key="-DISCTAB-", size=(30, 1))],
-    [sg.Text("Select Data Tab for Baseline Price:"), sg.Combo(values=[], key="-BASETAB-", size=(30, 1))],
+    [sg.Text("Upload Excel File:"), sg.Input(key="-FILE-"), sg.FileBrowse(file_types=(("Excel Files", "*.xlsx"),))],
+    [sg.Frame("Tab Mapping (only for Excel Upload)", [
+        [sg.Text("Capacity Tab:"), sg.Combo(values=[], key="-CAPTAB-", size=(30, 1))],
+        [sg.Text("Demand Tab:"), sg.Combo(values=[], key="-DEMTAB-", size=(30, 1))],
+        [sg.Text("Item Attributes Tab:"), sg.Combo(values=[], key="-ITEMTAB-", size=(30, 1))],
+        [sg.Text("Price Tab:"), sg.Combo(values=[], key="-PRICETAB-", size=(30, 1))],
+        [sg.Text("Rebate Structure Tab:"), sg.Combo(values=[], key="-REBATTAB-", size=(30, 1))],
+        [sg.Text("Discount Structure Tab:"), sg.Combo(values=[], key="-DISCTAB-", size=(30, 1))],
+        [sg.Text("Baseline Price Tab:"), sg.Combo(values=[], key="-BASETAB-", size=(30, 1))]
+    ], visible=False, key="-MAPFRAME-")],
+    [sg.Frame("Custom Rules", [
+        [sg.Text("Rule Type:"), sg.Combo(["% of Volume Awarded"], key="-RULETYPE-", size=(25, 1))],
+        [sg.Text("Operator:"), sg.Combo(["At least", "At most", "Exactly"], key="-RULEOP-", size=(25,1), default_value="At least")],
+        [sg.Text("Rule Input (%):"), sg.Input(key="-RULEINPUT-", size=(10,1))],
+        [sg.Text("Grouping:"), sg.Combo(["All", "Facility", "Capacity Group", "BusinessUnit", "Incumbent"], key="-GROUPING-", size=(25,1), enable_events=True)],
+        [sg.Text("Grouping Scope:"), sg.Combo([], key="-GROUPSCOPE-", size=(25,1))],
+        [sg.Text("Supplier Scope:"), sg.Combo(suppliers, key="-SUPPSCOPE-", size=(25,1))],
+        [sg.Button("Add Rule", key="-ADDRULE-"), sg.Button("Clear Rules", key="-CLEARRULES-")],
+        [sg.Multiline("", size=(60,5), key="-RULELIST-")]
+    ])],
     [sg.Button("Load Excel File")],
     [sg.Button("Download All Example Data")],
-    [sg.Button("Run Example"), sg.Button("Run Uploaded Data")],
+    [sg.Button("Run Optimization")],
     [sg.Button("Exit")]
 ]
 
 window = sg.Window("Capacity & Optimization Input", layout)
 uploaded_file = None
+rules_list = []
+
+def update_grouping_scope(grouping, item_attr_data):
+    unique_vals = sorted({str(item_attr_data[j].get(grouping, "")).strip() for j in item_attr_data})
+    return unique_vals
+
+def rule_to_text(rule):
+    if rule["rule_type"] == "% of Volume Awarded":
+        supplier_text = f"Supplier {rule['supplier_scope']}"
+        if rule["grouping"] == "All":
+            grouping_text = "all items"
+        else:
+            grouping_text = rule["grouping_scope"]
+        return f"{rule['operator']} {rule['rule_input']}% of {grouping_text} volume awarded to {supplier_text}"
+    else:
+        return str(rule)
 
 while True:
     event, values = window.read()
+    window["-MAPFRAME-"].update(visible=values["-UPLOAD-"])
+    
     if event in (sg.WINDOW_CLOSED, "Exit"):
         break
     elif event == "Load Excel File":
@@ -427,21 +496,63 @@ while True:
                 window["-REBATTAB-"].update(values=sheet_names, value=sheet_names[0])
                 window["-DISCTAB-"].update(values=sheet_names, value=sheet_names[0])
                 window["-BASETAB-"].update(values=sheet_names, value=sheet_names[0])
-                sg.popup("Excel file loaded successfully.\nSelect the corresponding sheet for each data table.")
+                sg.popup("Excel file loaded successfully.\nNow select 'Excel Upload' as Data Source and map the tabs.")
                 uploaded_file = file_path
             except Exception as e:
                 sg.popup_error("Error reading Excel file:", e)
         else:
             sg.popup("No file selected.")
+    elif event == "-GROUPING-":
+        grouping = values["-GROUPING-"]
+        if grouping == "All":
+            window["-GROUPSCOPE-"].update(value="", values=[], disabled=True)
+        else:
+            window["-GROUPSCOPE-"].update(disabled=False)
+            if values["-EXAMPLE-"]:
+                scope_vals = update_grouping_scope(grouping, default_item_attributes)
+            else:
+                if uploaded_file:
+                    try:
+                        df_item = pd.read_excel(uploaded_file, sheet_name=values["-ITEMTAB-"])
+                        temp_item_attr = {str(row["Item"]).strip(): {"BusinessUnit": row["BusinessUnit"],
+                                                                       "Incumbent": row["Incumbent"],
+                                                                       "Capacity Group": row["Capacity Group"],
+                                                                       "Facility": row["Facility"]}
+                                          for idx, row in df_item.iterrows()}
+                        scope_vals = update_grouping_scope(grouping, temp_item_attr)
+                    except Exception as e:
+                        scope_vals = []
+                else:
+                    scope_vals = update_grouping_scope(grouping, default_item_attributes)
+            window["-GROUPSCOPE-"].update(values=scope_vals, value=scope_vals[0] if scope_vals else "")
+    elif event == "-ADDRULE-":
+        try:
+            rule_input = float(values["-RULEINPUT-"])
+            if not (0 <= rule_input <= 100):
+                sg.popup_error("Please enter a percentage between 0 and 100 for rule input.")
+                continue
+        except:
+            sg.popup_error("Please enter a valid percentage for rule input.")
+            continue
+        rule = {
+            "rule_type": values["-RULETYPE-"],
+            "operator": values["-RULEOP-"],
+            "rule_input": values["-RULEINPUT-"],
+            "grouping": values["-GROUPING-"],
+            "grouping_scope": values["-GROUPSCOPE-"],
+            "supplier_scope": values["-SUPPSCOPE-"]
+        }
+        rules_list.append(rule)
+        window["-RULELIST-"].update("\n".join([rule_to_text(r) for r in rules_list]))
+    elif event == "-CLEARRULES-":
+        rules_list = []
+        window["-RULELIST-"].update("")
     elif event == "Download All Example Data":
         home_dir = os.path.expanduser("~")
         downloads_folder = os.path.join(home_dir, "Downloads")
         out_file = os.path.join(downloads_folder, "all_example_data.xlsx")
         with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
-            if values["-GLOBAL-"]:
-                df_global_capacity.to_excel(writer, sheet_name="Capacity", index=False)
-            else:
-                df_per_item_capacity.to_excel(writer, sheet_name="Capacity", index=False)
+            df_global_capacity.to_excel(writer, sheet_name="Capacity", index=False)
             df_demand.to_excel(writer, sheet_name="Demand", index=False)
             df_item_attr.to_excel(writer, sheet_name="Item Attributes", index=False)
             df_price.to_excel(writer, sheet_name="Price", index=False)
@@ -449,87 +560,80 @@ while True:
             df_discount.to_excel(writer, sheet_name="Discount Structure", index=False)
             df_baseline.to_excel(writer, sheet_name="Baseline Price", index=False)
         sg.popup("Example data saved to:", out_file)
-    elif event == "Run Example":
+    elif event == "Run Optimization":
         use_global = values["-GLOBAL-"]
-        # Use default data.
-        cap_dict = default_global_capacity if use_global else default_per_item_capacity
-        demand_dict = default_demand
-        item_attr_dict = default_item_attributes
-        price_dict = default_price
-        rebate_tiers = default_rebate_tiers
-        discount_tiers = default_discount_tiers
-        baseline_dict = default_baseline_price
-        output_file, feasibility_notes, model_status = run_optimization(use_global, cap_dict,
-                                                                         demand_dict, item_attr_dict,
-                                                                         price_dict, rebate_tiers,
-                                                                         discount_tiers,
-                                                                         baseline_dict)
-        sg.popup(f"(Example Data) Model Status: {model_status}\nExcel results written to:\n{output_file}\n\nFeasibility Notes:\n{feasibility_notes}")
-    elif event == "Run Uploaded Data":
-        use_global = values["-GLOBAL-"]
-        if uploaded_file is not None and uploaded_file.strip() != "":
-            try:
-                df_cap = pd.read_excel(uploaded_file, sheet_name=values["-CAPTAB-"])
-                df_dem = pd.read_excel(uploaded_file, sheet_name=values["-DEMTAB-"])
-                df_item = pd.read_excel(uploaded_file, sheet_name=values["-ITEMTAB-"])
-                df_price = pd.read_excel(uploaded_file, sheet_name=values["-PRICETAB-"])
-                df_reb = pd.read_excel(uploaded_file, sheet_name=values["-REBATTAB-"])
-                df_disc = pd.read_excel(uploaded_file, sheet_name=values["-DISCTAB-"])
-                df_base = pd.read_excel(uploaded_file, sheet_name=values["-BASETAB-"])
-            except Exception as e:
-                sg.popup_error("Error reading one or more data tables from Excel:", e)
-                continue
-            if use_global:
-                cap_dict = {}
-                for idx, row in df_cap.iterrows():
-                    key = (str(row["Supplier Name"]).strip(), str(row["Capacity Group"]).strip())
-                    cap_dict[key] = row["Capacity"]
-            else:
-                cap_dict = {}
-                for idx, row in df_cap.iterrows():
-                    key = (str(row["Supplier Name"]).strip(), str(row["Item"]).strip())
-                    cap_dict[key] = row["Capacity"]
-            demand_dict = {row["Item"]: row["Demand"] for idx, row in df_dem.iterrows()}
-            item_attr_dict = {}
-            for idx, row in df_item.iterrows():
-                item = str(row["Item"]).strip()
-                item_attr_dict[item] = {
-                    "BusinessUnit": row["BusinessUnit"],
-                    "Incumbent": row["Incumbent"],
-                    "Capacity Group": row["Capacity Group"],
-                    "Facility": row["Facility"]
-                }
-            price_dict = {}
-            for idx, row in df_price.iterrows():
-                key = (str(row["Supplier Name"]).strip(), str(row["Item"]).strip())
-                price_dict[key] = row["Price"]
-            rebate_tiers = {}
-            for idx, row in df_reb.iterrows():
-                supplier = str(row["Supplier Name"]).strip()
-                rebate_tiers.setdefault(supplier, []).append((row["Min Volume"], row["Max Volume"], row["Rebate Percentage"],
-                                                               row.get("Scope Attribute", None) or None,
-                                                               row.get("Scope Value", None) or None))
-            discount_tiers = {}
-            for idx, row in df_disc.iterrows():
-                supplier = str(row["Supplier Name"]).strip()
-                discount_tiers.setdefault(supplier, []).append((row["Min Volume"], row["Max Volume"], row["Discount Percentage"],
-                                                                 row.get("Scope Attribute", None) or None,
-                                                                 row.get("Scope Value", None) or None))
-            for s in suppliers:
-                if s not in rebate_tiers:
-                    rebate_tiers[s] = default_rebate_tiers[s]
-                if s not in discount_tiers:
-                    discount_tiers[s] = default_discount_tiers[s]
-            baseline_dict = {row["Item"]: row["Baseline Price"] for idx, row in df_base.iterrows()}
+        if values["-EXAMPLE-"]:
+            cap_dict = default_global_capacity if use_global else default_per_item_capacity
+            demand_dict = default_demand
+            item_attr_dict = default_item_attributes
+            price_dict = default_price
+            rebate_tiers = default_rebate_tiers
+            discount_tiers = default_discount_tiers
+            baseline_dict = default_baseline_price
         else:
-            sg.popup("No Excel file attached. Please upload a file and map the data tabs.")
-            continue
-
+            if uploaded_file is not None and uploaded_file.strip() != "":
+                try:
+                    df_cap = pd.read_excel(uploaded_file, sheet_name=values["-CAPTAB-"])
+                    df_dem = pd.read_excel(uploaded_file, sheet_name=values["-DEMTAB-"])
+                    df_item = pd.read_excel(uploaded_file, sheet_name=values["-ITEMTAB-"])
+                    df_price = pd.read_excel(uploaded_file, sheet_name=values["-PRICETAB-"])
+                    df_reb = pd.read_excel(uploaded_file, sheet_name=values["-REBATTAB-"])
+                    df_disc = pd.read_excel(uploaded_file, sheet_name=values["-DISCTAB-"])
+                    df_base = pd.read_excel(uploaded_file, sheet_name=values["-BASETAB-"])
+                except Exception as e:
+                    sg.popup_error("Error reading one or more data tables from Excel:", e)
+                    continue
+                if use_global:
+                    cap_dict = {}
+                    for idx, row in df_cap.iterrows():
+                        key = (str(row["Supplier Name"]).strip(), str(row["Capacity Group"]).strip())
+                        cap_dict[key] = row["Capacity"]
+                else:
+                    cap_dict = {}
+                    for idx, row in df_cap.iterrows():
+                        key = (str(row["Supplier Name"]).strip(), str(row["Item"]).strip())
+                        cap_dict[key] = row["Capacity"]
+                demand_dict = {row["Item"]: row["Demand"] for idx, row in df_dem.iterrows()}
+                item_attr_dict = {}
+                for idx, row in df_item.iterrows():
+                    item = str(row["Item"]).strip()
+                    item_attr_dict[item] = {
+                        "BusinessUnit": row["BusinessUnit"],
+                        "Incumbent": row["Incumbent"],
+                        "Capacity Group": row["Capacity Group"],
+                        "Facility": row["Facility"]
+                    }
+                price_dict = {}
+                for idx, row in df_price.iterrows():
+                    key = (str(row["Supplier Name"]).strip(), str(row["Item"]).strip())
+                    price_dict[key] = row["Price"]
+                rebate_tiers = {}
+                for idx, row in df_reb.iterrows():
+                    supplier = str(row["Supplier Name"]).strip()
+                    rebate_tiers.setdefault(supplier, []).append((row["Min Volume"], row["Max Volume"], row["Rebate Percentage"],
+                                                                   row.get("Scope Attribute", None) or None,
+                                                                   row.get("Scope Value", None) or None))
+                discount_tiers = {}
+                for idx, row in df_disc.iterrows():
+                    supplier = str(row["Supplier Name"]).strip()
+                    discount_tiers.setdefault(supplier, []).append((row["Min Volume"], row["Max Volume"], row["Discount Percentage"],
+                                                                     row.get("Scope Attribute", None) or None,
+                                                                     row.get("Scope Value", None) or None))
+                for s in suppliers:
+                    if s not in rebate_tiers:
+                        rebate_tiers[s] = default_rebate_tiers[s]
+                    if s not in discount_tiers:
+                        discount_tiers[s] = default_discount_tiers[s]
+                baseline_dict = {row["Item"]: row["Baseline Price"] for idx, row in df_base.iterrows()}
+            else:
+                sg.popup("No Excel file attached. Please upload a file and map the data tabs.")
+                continue
+        
         output_file, feasibility_notes, model_status = run_optimization(use_global, cap_dict,
                                                                          demand_dict, item_attr_dict,
                                                                          price_dict, rebate_tiers,
                                                                          discount_tiers,
-                                                                         baseline_dict)
-        sg.popup(f"(Uploaded Data) Model Status: {model_status}\nExcel results written to:\n{output_file}\n\nFeasibility Notes:\n{feasibility_notes}")
+                                                                         baseline_dict, rules_list)
+        sg.popup(f"Model Status: {model_status}\nExcel results written to:\n{output_file}\n\nFeasibility Notes:\n{feasibility_notes}")
 
 window.close()
