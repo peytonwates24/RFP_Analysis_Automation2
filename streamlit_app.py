@@ -668,9 +668,9 @@ def main():
 
                 # Retrieve supplier options from the mapped "Supplier Name" column.
                 if (
-                    "merged_data" in st.session_state 
-                    and "column_mapping" in st.session_state 
-                    and st.session_state.column_mapping.get("Supplier Name")
+                    "merged_data" in st.session_state and 
+                    "column_mapping" in st.session_state and 
+                    st.session_state.column_mapping.get("Supplier Name")
                 ):
                     mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
                     supplier_options = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
@@ -680,32 +680,44 @@ def main():
                 # 1. Maximum Suppliers Constraint
                 if st.checkbox("Enable maximum suppliers constraint", key="enable_max_suppliers"):
                     default_max = len(supplier_options) if supplier_options else 1
-                    max_suppliers = st.number_input(
+                    max_suppliers_input = st.number_input(
                         "Maximum number of suppliers awarded across all bid IDs",
                         min_value=1,
                         value=default_max,
                         step=1,
-                        key="max_suppliers"
+                        key="max_suppliers_input"
                     )
+                    col_save_remove = st.columns(2)
+                    with col_save_remove[0]:
+                        if st.button("Save Maximum Suppliers", key="save_max_suppliers"):
+                            st.session_state["max_suppliers"] = max_suppliers_input
+                            st.success(f"Maximum Suppliers saved: {max_suppliers_input}")
+                    with col_save_remove[1]:
+                        if st.button("Remove Maximum Suppliers", key="remove_max_suppliers"):
+                            if "max_suppliers" in st.session_state:
+                                del st.session_state["max_suppliers"]
+                            st.success("Maximum Suppliers removed.")
+                    if "max_suppliers" in st.session_state:
+                        st.write("**Saved Maximum Suppliers:**", st.session_state["max_suppliers"])
+                    else:
+                        st.write("**No Maximum Suppliers constraint saved.**")
 
                 # 2. Supplier Volume Allocation Constraint
                 if st.checkbox("Enable supplier volume allocation constraint", key="enable_supplier_capacity"):
                     st.markdown("#### Supplier Volume Allocation Constraint")
                     st.write("Review and edit the supplier capacity allocations. The table is auto-populated from the 'capacity' sheet if available; otherwise, default values are used. None of the fields are mandatory.")
                     
-                    # Retrieve supplier options:
-                    # If a capacity sheet was loaded, use its 'Supplier Name' column.
+                    # Retrieve supplier options: from capacity sheet if available; otherwise, from merged data.
                     if "capacity_data" in st.session_state:
-                        supplier_options = st.session_state.capacity_data["Supplier Name"].dropna().unique().tolist()
+                        supplier_options_cap = st.session_state.capacity_data["Supplier Name"].dropna().unique().tolist()
                     else:
-                        # Otherwise, use the mapped supplier names from the merged data.
                         if ("merged_data" in st.session_state and 
                             "column_mapping" in st.session_state and 
                             st.session_state.column_mapping.get("Supplier Name")):
                             mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
-                            supplier_options = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
+                            supplier_options_cap = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
                         else:
-                            supplier_options = []
+                            supplier_options_cap = []
                     
                     # Provide a selector for the grouping column from the merged data headers.
                     if st.session_state.get("merged_data") is not None:
@@ -714,24 +726,21 @@ def main():
                             options=st.session_state.merged_data.columns.tolist(),
                             key="capacity_grouping_selector"
                         )
-                        # Pull unique values from the selected grouping column.
                         grouping_values = st.session_state.merged_data[selected_grouping_col].dropna().unique().tolist()
                     else:
                         grouping_values = []
  
-                    # Define column configuration with 3 columns: Supplier Name, Capacity, and Grouping.
                     capacity_column_config = {
-                        "Supplier Name": st.column_config.SelectboxColumn("Supplier Name", options=supplier_options),
+                        "Supplier Name": st.column_config.SelectboxColumn("Supplier Name", options=supplier_options_cap),
                         "Capacity": st.column_config.NumberColumn("Capacity", min_value=0, step=1),
                         "Grouping": st.column_config.SelectboxColumn("Grouping", options=grouping_values, help="Select a subgrouping value")
                     }
                     
-                    # Use capacity data from the capacity sheet if available; otherwise, create default data.
                     if "capacity_data" in st.session_state:
                         default_capacity_data = st.session_state["capacity_data"]
                     else:
                         default_capacity_data = pd.DataFrame({
-                            "Supplier Name": [supplier_options[0] if supplier_options else ""],
+                            "Supplier Name": [supplier_options_cap[0] if supplier_options_cap else ""],
                             "Capacity": [0],
                             "Grouping": [""]
                         })
@@ -742,19 +751,87 @@ def main():
                         num_rows="dynamic",
                         key="capacity_editor"
                     )
-                    st.session_state["capacity_data"] = capacity_df
-
-
+                    col_cap_save_remove = st.columns(2)
+                    with col_cap_save_remove[0]:
+                        if st.button("Save Capacity Data", key="save_capacity_data"):
+                            st.session_state["capacity_data"] = capacity_df
+                            st.success("Capacity data saved.")
+                    with col_cap_save_remove[1]:
+                        if st.button("Remove Capacity Data", key="remove_capacity_data"):
+                            if "capacity_data" in st.session_state:
+                                del st.session_state["capacity_data"]
+                            st.success("Capacity data removed.")
+                    if "capacity_data" in st.session_state:
+                        st.write("**Saved Capacity Data:**")
+                        st.dataframe(st.session_state["capacity_data"])
+                    else:
+                        st.write("**No Capacity Data saved.**")
 
                 # 3. Maximum Transitions Constraint
                 if st.checkbox("Enable maximum transitions constraint", key="enable_max_transitions"):
-                    max_transitions = st.number_input(
-                        "Maximum transitions from incumbent to new awarded supplier",
-                        min_value=0,
-                        value=0,
-                        step=1,
-                        key="max_transitions"
-                    )
+                    st.markdown("#### Maximum Transitions Constraint")
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        global_max_transitions = st.number_input(
+                            "Global maximum transitions from incumbent to new awarded supplier",
+                            min_value=0,
+                            value=0,
+                            step=1,
+                            key="global_max_transitions"
+                        )
+                    with col2:
+                        limit_by_grouping = st.checkbox("Limit by grouping", key="limit_transitions_by_grouping")
+                    
+                    col_trans_save_remove = st.columns(2)
+                    with col_trans_save_remove[0]:
+                        if st.button("Save Global Transitions", key="save_global_transitions"):
+                            st.session_state["max_transitions_global"] = global_max_transitions
+                            st.success(f"Global maximum transitions saved: {global_max_transitions}")
+                    with col_trans_save_remove[1]:
+                        if st.button("Remove Global Transitions", key="remove_global_transitions"):
+                            if "max_transitions_global" in st.session_state:
+                                del st.session_state["max_transitions_global"]
+                            st.success("Global maximum transitions removed.")
+                    if "max_transitions_global" in st.session_state:
+                        st.write("**Saved Global Maximum Transitions:**", st.session_state["max_transitions_global"])
+                    else:
+                        st.write("**No Global Maximum Transitions saved.**")
+                    
+                    if limit_by_grouping:
+                        if st.session_state.get("merged_data") is not None:
+                            grouping_columns = st.session_state.merged_data.columns.tolist()
+                            selected_transitions_grouping = st.selectbox(
+                                "Select grouping column for transitions constraint",
+                                options=grouping_columns,
+                                key="transitions_grouping"
+                            )
+                            unique_group_values = st.session_state.merged_data[selected_transitions_grouping].dropna().unique().tolist()
+                            default_transitions_df = pd.DataFrame({
+                                selected_transitions_grouping: unique_group_values,
+                                "Max Transitions": [global_max_transitions] * len(unique_group_values)
+                            })
+                            transitions_df = st.data_editor(
+                                default_transitions_df,
+                                num_rows="dynamic",
+                                key="transitions_group_df"
+                            )
+                            col_group_trans_save_remove = st.columns(2)
+                            with col_group_trans_save_remove[0]:
+                                if st.button("Save Group Transitions", key="save_group_transitions"):
+                                    st.session_state["transitions_group_data"] = transitions_df
+                                    st.success("Group transitions data saved.")
+                            with col_group_trans_save_remove[1]:
+                                if st.button("Remove Group Transitions", key="remove_group_transitions"):
+                                    if "transitions_group_data" in st.session_state:
+                                        del st.session_state["transitions_group_data"]
+                                    st.success("Group transitions data removed.")
+                            if "transitions_group_data" in st.session_state:
+                                st.write("**Saved Group Transitions Data:**")
+                                st.dataframe(st.session_state["transitions_group_data"])
+                            else:
+                                st.write("**No Group Transitions Data saved.**")
+                        else:
+                            st.warning("No merged data available to derive grouping values.")
 
                 # 4. Lock In Supplier Constraint
                 if st.checkbox("Enable lock in supplier constraint", key="enable_lock_in"):
@@ -774,6 +851,21 @@ def main():
                         num_rows="dynamic",
                         key="lock_in_editor"
                     )
+                    col_lockin_save_remove = st.columns(2)
+                    with col_lockin_save_remove[0]:
+                        if st.button("Save Lock In Data", key="save_lock_in"):
+                            st.session_state["lock_in_data"] = lock_in_df
+                            st.success("Lock In Supplier data saved.")
+                    with col_lockin_save_remove[1]:
+                        if st.button("Remove Lock In Data", key="remove_lock_in"):
+                            if "lock_in_data" in st.session_state:
+                                del st.session_state["lock_in_data"]
+                            st.success("Lock In Supplier data removed.")
+                    if "lock_in_data" in st.session_state:
+                        st.write("**Saved Lock In Data:**")
+                        st.dataframe(st.session_state["lock_in_data"])
+                    else:
+                        st.write("**No Lock In Supplier data saved.**")
 
                 # 5. Exclude Suppliers Constraint
                 if st.checkbox("Enable supplier exclusion constraint", key="enable_exclusions"):
@@ -783,21 +875,54 @@ def main():
                         options=supplier_options,
                         key="global_exclusions"
                     )
-                    st.write("Alternatively, specify per-Bid ID exclusions below:")
+                    st.write("Alternatively, specify per-rule exclusions below:")
+                    
+                    if st.session_state.get("merged_data") is not None:
+                        exclusion_parent_column = st.selectbox(
+                            "Select Parent Column for Exclusions",
+                            options=st.session_state.merged_data.columns.tolist(),
+                            key="exclusion_parent_column"
+                        )
+                        parent_options = st.session_state.merged_data[exclusion_parent_column].dropna().unique().tolist()
+                    else:
+                        exclusion_parent_column = "Bid ID"
+                        parent_options = bid_options
+                        
                     exclusions_column_config = {
-                        "Bid ID": st.column_config.SelectboxColumn("Bid ID", options=bid_options),
-                        "Excluded Supplier": st.column_config.SelectboxColumn("Excluded Supplier", options=supplier_options, help="Select a supplier to exclude")
+                        exclusion_parent_column: st.column_config.SelectboxColumn(
+                            exclusion_parent_column, options=parent_options
+                        ),
+                        "Excluded Supplier": st.column_config.SelectboxColumn(
+                            "Excluded Supplier", options=supplier_options, help="Select a supplier to exclude"
+                        )
                     }
+                    
                     default_exclusions = pd.DataFrame({
-                        "Bid ID": [bid_options[0] if bid_options else ""],
+                        exclusion_parent_column: [parent_options[0] if parent_options else ""],
                         "Excluded Supplier": [supplier_options[0] if supplier_options else ""]
                     })
+                    
                     exclusions_df = st.data_editor(
                         default_exclusions,
                         column_config=exclusions_column_config,
                         num_rows="dynamic",
                         key="exclusions_editor"
                     )
+                    col_excl_save_remove = st.columns(2)
+                    with col_excl_save_remove[0]:
+                        if st.button("Save Exclusions", key="save_exclusions"):
+                            st.session_state["exclusions_data"] = exclusions_df
+                            st.success("Exclusion data saved.")
+                    with col_excl_save_remove[1]:
+                        if st.button("Remove Exclusions", key="remove_exclusions"):
+                            if "exclusions_data" in st.session_state:
+                                del st.session_state["exclusions_data"]
+                            st.success("Exclusion data removed.")
+                    if "exclusions_data" in st.session_state:
+                        st.write("**Saved Exclusions Data:**")
+                        st.dataframe(st.session_state["exclusions_data"])
+                    else:
+                        st.write("**No Exclusion data saved.**")
 
                 # 6. Splitting Awarded Supplier Constraint
                 allow_splitting = st.checkbox(
@@ -828,13 +953,30 @@ def main():
                         num_rows="dynamic",
                         key="split_editor"
                     )
+                    col_split_save_remove = st.columns(2)
+                    with col_split_save_remove[0]:
+                        if st.button("Save Split Data", key="save_split"):
+                            st.session_state["split_data"] = split_df
+                            st.success("Split data saved.")
+                    with col_split_save_remove[1]:
+                        if st.button("Remove Split Data", key="remove_split"):
+                            if "split_data" in st.session_state:
+                                del st.session_state["split_data"]
+                            st.success("Split data removed.")
+                    if "split_data" in st.session_state:
+                        st.write("**Saved Split Data:**")
+                        st.dataframe(st.session_state["split_data"])
+                    else:
+                        st.write("**No Split data saved.**")
+
+
 
             # === Scenario Optimizer Section ===
             with st.expander("Scenario Optimizer", expanded=False):
+                st.markdown("### Scenario Optimizer")
+                st.write("Define optional scenario optimization rules to adjust outcomes. Check the box below to enable the Scenario Optimizer and configure its rules.")
+                
                 if st.checkbox("Enable Scenario Optimizer", key="enable_scenario_optimizer"):
-                    st.markdown("### Scenario Optimizer")
-                    st.write("Configure scenario optimization settings. (This section is for interface purposes only.)")
-                    
                     # --- Grouping Column Selector (outside the form) ---
                     if st.session_state.get("merged_data") is not None:
                         grouping_columns = st.session_state.merged_data.columns.tolist()
@@ -921,14 +1063,11 @@ def main():
                                 st.session_state["scenario_rules"] = []
                             st.session_state["scenario_rules"].append(new_rule)
                             st.success("Rule added.")
-                            # Optionally, you can remove the rerun if not desired.
-                            # st.experimental_rerun()
                     
                     # ---- Display Added Rules with Descriptions ----
                     st.markdown("#### Added Rules")
                     if "scenario_rules" in st.session_state and st.session_state["scenario_rules"]:
                         for idx, rule in enumerate(st.session_state["scenario_rules"]):
-                            # Build a descriptive sentence based on the rule.
                             if rule.get("Capacity Scope", "").strip().lower() == "global":
                                 scope_desc = "Globally"
                             else:
