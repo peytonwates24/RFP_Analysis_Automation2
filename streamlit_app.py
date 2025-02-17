@@ -328,7 +328,7 @@ def main():
                     bid_files_suppliers.append((bid_file, supplier_name, bid_sheet))
                     logger.info(f"Uploaded Bid Sheet {i + 1} for supplier '{supplier_name}' with sheet '{bid_sheet}'.")
  
-            # Merge Data
+            # Merge Data (bid data) is already done here...
             if st.button("Merge Data"):
                 if validate_uploaded_file(baseline_file) and bid_files_suppliers:
                     if not baseline_sheet:
@@ -342,14 +342,66 @@ def main():
                             st.session_state.baseline_data = load_baseline_data(baseline_file, baseline_sheet)
                             st.success("Data merged successfully. Please map the columns for analysis.")
                             logger.info("Data merged successfully.")
- 
- 
-                            # ---- Run the warning checks ----
+
+                            # ---- Merge Rebate and Capacity Data from Each Bid File ----
+                            rebate_dfs = []
+                            capacity_dfs = []
+                            # Loop through each bid file tuple: (bid_file, supplier_name, bid_sheet)
+                            for bid_file, supplier_name, bid_sheet in bid_files_suppliers:
+                                try:
+                                    # Load the Excel file once.
+                                    excel_bid = pd.ExcelFile(bid_file, engine="openpyxl")
+                                except Exception as e:
+                                    st.error(f"Error reading bid file for supplier {supplier_name}: {e}")
+                                    continue
+
+                                # Check for a "rebates" sheet.
+                                for sheet in excel_bid.sheet_names:
+                                    if sheet.strip().lower() == "rebates":
+                                        try:
+                                            df_rebates = pd.read_excel(bid_file, sheet_name=sheet, engine="openpyxl")
+                                            # If the Supplier Name column is not present, add it.
+                                            if "Supplier Name" not in df_rebates.columns:
+                                                df_rebates["Supplier Name"] = supplier_name
+                                            rebate_dfs.append(df_rebates)
+                                        except Exception as e:
+                                            st.error(f"Error reading rebates sheet for supplier {supplier_name}: {e}")
+                                
+                                # Check for a "capacity" sheet.
+                                for sheet in excel_bid.sheet_names:
+                                    if sheet.strip().lower() == "capacity":
+                                        try:
+                                            df_capacity = pd.read_excel(bid_file, sheet_name=sheet, engine="openpyxl")
+                                            if "Supplier Name" not in df_capacity.columns:
+                                                df_capacity["Supplier Name"] = supplier_name
+                                            capacity_dfs.append(df_capacity)
+                                        except Exception as e:
+                                            st.error(f"Error reading capacity sheet for supplier {supplier_name}: {e}")
+                            
+                            # Merge all rebate DataFrames if any were found.
+                            if rebate_dfs:
+                                merged_rebates = pd.concat(rebate_dfs, ignore_index=True)
+                                st.session_state["rebates_data"] = merged_rebates
+                                st.success("Rebate data merged successfully.")
+                            else:
+                                st.warning("No rebates sheets found in the bid files; default rebate data will be used.")
+                            
+                            # Merge all capacity DataFrames if any were found.
+                            if capacity_dfs:
+                                merged_capacity = pd.concat(capacity_dfs, ignore_index=True)
+                                st.session_state["capacity_data"] = merged_capacity
+                                st.success("Capacity data merged successfully.")
+                            else:
+                                st.warning("No capacity sheets found in the bid files; default capacity data will be used.")
+                            
+                            # ---- Run the warning checks on the bid data as before ----
                             run_merge_warnings(
                                 st.session_state.baseline_data,
                                 st.session_state.merged_data,
-                                bid_files_suppliers
+                                bid_files_suppliers,
+                                container=st.container()
                             )
+
  
         else:
             # For Merged Data input method
