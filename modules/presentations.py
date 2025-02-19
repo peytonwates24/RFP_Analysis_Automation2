@@ -111,9 +111,29 @@ def add_row_labels(slide):
         label_box.line.fill.background()
 
 def add_scenario_content(slide, df, scenario, scenario_position):
-    """Adds the content for a single scenario to the slide. scenario_position: 1, 2, or 3"""
+    """
+    Adds the content for a single scenario to the slide.
+    scenario_position: 1, 2, or 3.
+    
+    IMPORTANT:
+    The raw DataFrame may contain duplicate rows per Bid ID. The Excel output is
+    produced from data aggregated by Bid ID. Here we group by 'Bid ID' and sum the
+    relevant savings and baseline spend fields so that the totals match the Excel."""
+
+
+    # Ensure columns are stripped
     df.columns = df.columns.str.strip()
 
+    # Log a sample row for debugging and check data types for savings columns.
+    sample = df[df['AST Savings'] != 0].head(1)
+    if not sample.empty:
+        logger.debug("Sample row for scenario '%s': %s", scenario, sample.iloc[0].to_dict())
+        logger.debug("Data types: AST Savings=%s, Current Savings=%s",
+                     df['AST Savings'].dtype, df['Current Savings'].dtype)
+    else:
+        logger.debug("No nonzero AST Savings found for scenario '%s'.", scenario)
+
+    # Ensure required columns exist.
     expected_columns = [
         'Awarded Supplier Name',
         'Awarded Supplier Spend',
@@ -126,6 +146,7 @@ def add_scenario_content(slide, df, scenario, scenario_position):
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in sheet '{scenario}'.")
 
+    # Define positions for the text boxes.
     base_left = Inches(2.72) + (scenario_position - 1) * Inches(3.15)
     positions = {
         'scenario_name': {'left': base_left, 'top': Inches(0.8), 'width': Inches(2.5), 'height': Inches(0.34)},
@@ -135,7 +156,7 @@ def add_scenario_content(slide, df, scenario, scenario_position):
         'key_considerations': {'left': base_left, 'top': Inches(4.88), 'width': Inches(2.5), 'height': Inches(2.0)},
     }
 
-    # Add Scenario Name
+    # Add Scenario Name box.
     scenario_name_box = slide.shapes.add_textbox(
         positions['scenario_name']['left'],
         positions['scenario_name']['top'],
@@ -155,7 +176,7 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     scenario_name_box.fill.background()
     scenario_name_box.line.fill.background()
 
-    # Add Description Entry
+    # Add Description Entry.
     desc_entry = slide.shapes.add_textbox(
         positions['description']['left'],
         positions['description']['top'],
@@ -174,7 +195,7 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     desc_entry.fill.background()  # No Fill
     desc_entry.line.fill.background()  # No Line
 
-    # Add Suppliers Entry
+    # Add Suppliers Entry.
     suppliers_entry = slide.shapes.add_textbox(
         positions['suppliers_entry']['left'],
         positions['suppliers_entry']['top'],
@@ -185,15 +206,13 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     suppliers_entry_tf.vertical_anchor = MSO_ANCHOR.TOP
     suppliers_entry_tf.word_wrap = True
     p = suppliers_entry_tf.paragraphs[0]
-    # Calculate number of suppliers and % spend
+    # Calculate number of suppliers and % spend.
     total_spend = df['Awarded Supplier Spend'].sum()
     suppliers = df.groupby('Awarded Supplier Name')['Awarded Supplier Spend'].sum().reset_index()
     suppliers['Spend %'] = suppliers['Awarded Supplier Spend'] / total_spend * 100
-    # Sort suppliers by 'Spend %' in descending order
     suppliers = suppliers.sort_values(by='Spend %', ascending=False)
     num_suppliers = suppliers['Awarded Supplier Name'].nunique()
     supplier_list = [f"{row['Awarded Supplier Name']} ({row['Spend %']:.0f}%)" for idx, row in suppliers.iterrows()]
-    # Print # of suppliers in scenario suppliers joined with % of spend
     supplier_text = f"{num_suppliers}- " + ", ".join(supplier_list)
     p.text = supplier_text
     p.font.size = Pt(12)
@@ -203,18 +222,38 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     suppliers_entry.fill.background()  # No Fill
     suppliers_entry.line.fill.background()  # No Line
 
-    # Calculate AST Savings % and Current Savings %
-    total_ast_savings = df['AST Savings'].sum()
-    total_current_savings = df['Current Savings'].sum()
-    ast_baseline_spend = df['AST Baseline Spend'].sum()
-    current_baseline_spend = df['Current Baseline Spend'].sum()
+    # ---- Group data by Bid ID before summing savings and baseline spend ----
+    grouped = df.groupby("Bid ID").agg({
+        'AST Savings': 'sum',
+        'Current Savings': 'sum',
+        'AST Baseline Spend': 'sum',
+        'Current Baseline Spend': 'sum'
+    }).reset_index()
 
+    # Calculate totals from the aggregated (grouped) data.
+    total_ast_savings = grouped['AST Savings'].sum()
+    total_current_savings = grouped['Current Savings'].sum()
+    ast_baseline_spend = grouped['AST Baseline Spend'].sum()
+    current_baseline_spend = grouped['Current Baseline Spend'].sum()
+
+    # Log key metrics from the aggregated data.
+    logger.info("Scenario '%s': Unique Bid IDs (aggregated): %d", scenario, grouped['Bid ID'].nunique())
+    logger.info("Scenario '%s': Aggregated Total AST Savings = %s (AST Baseline Spend = %s)",
+                scenario,
+                format_currency(total_ast_savings),
+                format_currency(ast_baseline_spend))
+    logger.info("Scenario '%s': Aggregated Total Current Savings = %s (Current Baseline Spend = %s)",
+                scenario,
+                format_currency(total_current_savings),
+                format_currency(current_baseline_spend))
+
+    # Compute percentages from the aggregated (grouped) values.
     ast_savings_pct = (total_ast_savings / ast_baseline_spend * 100) if ast_baseline_spend != 0 else 0
     current_savings_pct = (total_current_savings / current_baseline_spend * 100) if current_baseline_spend != 0 else 0
 
     rfp_savings_str = f"{ast_savings_pct:.0f}% | {current_savings_pct:.0f}%"
 
-    # Add RFP Savings % Entry
+    # Add RFP Savings % Entry.
     rfp_entry = slide.shapes.add_textbox(
         positions['rfp_entry']['left'],
         positions['rfp_entry']['top'],
@@ -233,7 +272,7 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     rfp_entry.fill.background()  # No Fill
     rfp_entry.line.fill.background()  # No Line
 
-    # Add Key Considerations Entry
+    # Add Key Considerations Entry.
     key_entry = slide.shapes.add_textbox(
         positions['key_considerations']['left'],
         positions['key_considerations']['top'],
@@ -251,6 +290,8 @@ def add_scenario_content(slide, df, scenario, scenario_position):
     p.font.color.rgb = RGBColor(0, 0, 0)  # Black
     key_entry.fill.background()  # No Fill
     key_entry.line.fill.background()  # No Line
+
+
 
 def add_chart(slide, scenario_names, ast_savings_list, current_savings_list):
     """Adds a bar chart to the slide between RFP Savings % and Key Considerations."""
@@ -337,26 +378,35 @@ def process_scenario_dataframe(df, scenario_detail_grouping, require_grouping=Tr
     """
     Processes the scenario DataFrame to ensure required columns are present.
     If require_grouping=False, we do not insist on the scenario_detail_grouping column.
-
+    
+    This function renames alternate savings columns and forces a numeric conversion
+    so that the sums calculated later in the presentation code match the Excel output.
+    
+    Additionally, it logs the number of unique Bid IDs and the total savings values.
+    
     Parameters:
     - df: DataFrame to process.
     - scenario_detail_grouping: The grouping column name used for scenario details.
     - require_grouping: boolean, if True scenario_detail_grouping must be included, otherwise it's optional.
-
+    
     Returns:
     - df: Processed DataFrame with required columns added if necessary.
     """
+    from .config import logger  # Ensure logger is imported
 
-    # Ensure columns are stripped
+    logger.info("Starting process_scenario_dataframe")
+
+    # Remove any extra spaces from column names
     df.columns = df.columns.str.strip()
+    logger.debug("Columns after stripping: %s", df.columns.tolist())
 
-    # Map existing columns to required columns
+    # Rename known alternate column names
     df = df.rename(columns={
         'Awarded Supplier': 'Awarded Supplier Name'
-        # Add more mappings if necessary
+        # Add other mappings as needed
     })
 
-    # Base expected columns
+    # Define the base expected columns for presentation
     expected_columns = [
         'Awarded Supplier Name',
         'Awarded Supplier Spend',
@@ -365,68 +415,99 @@ def process_scenario_dataframe(df, scenario_detail_grouping, require_grouping=Tr
         'AST Baseline Spend',
         'Current Baseline Spend'
     ]
-
-    # Only include scenario_detail_grouping if require_grouping is True
     if require_grouping and scenario_detail_grouping:
         expected_columns.append(scenario_detail_grouping)
 
-    # Calculate 'Awarded Supplier Spend' if not present
+    # Calculate 'Awarded Supplier Spend' if missing
     if 'Awarded Supplier Spend' not in df.columns:
         if 'Awarded Supplier Price' in df.columns and 'Awarded Volume' in df.columns:
             df['Awarded Supplier Spend'] = df['Awarded Supplier Price'] * df['Awarded Volume']
+            logger.debug("Calculated Awarded Supplier Spend from Awarded Supplier Price and Awarded Volume.")
         else:
             df['Awarded Supplier Spend'] = 0
+            logger.warning("Awarded Supplier Spend not found; set to 0.")
 
-    # 'AST Baseline Spend'
+    # Set up 'AST Baseline Spend'
     if 'AST Baseline Spend' not in df.columns:
         if 'Baseline Spend' in df.columns:
             df['AST Baseline Spend'] = df['Baseline Spend']
+            logger.debug("Using Baseline Spend for AST Baseline Spend.")
         elif 'Baseline Price' in df.columns and 'Bid Volume' in df.columns:
             df['AST Baseline Spend'] = df['Baseline Price'] * df['Bid Volume']
+            logger.debug("Calculated AST Baseline Spend from Baseline Price and Bid Volume.")
         else:
             df['AST Baseline Spend'] = 0
+            logger.warning("AST Baseline Spend not found; set to 0.")
 
-    # 'AST Savings'
+    # For AST Savings, check if the alternate column exists then rename it
     if 'AST Savings' not in df.columns:
-        df['AST Savings'] = df['AST Baseline Spend'] - df['Awarded Supplier Spend']
+        if 'Baseline Savings' in df.columns:
+            df = df.rename(columns={'Baseline Savings': 'AST Savings'})
+            logger.info("Renamed 'Baseline Savings' to 'AST Savings'.")
+        else:
+            df['AST Savings'] = df['AST Baseline Spend'] - df['Awarded Supplier Spend']
+            logger.debug("Calculated AST Savings as AST Baseline Spend minus Awarded Supplier Spend.")
 
-    # 'Current Baseline Spend'
+    # Set up 'Current Baseline Spend'
     if 'Current Baseline Spend' not in df.columns:
         if 'Current Price' in df.columns and 'Bid Volume' in df.columns:
             df['Current Baseline Spend'] = df['Current Price'] * df['Bid Volume']
+            logger.debug("Calculated Current Baseline Spend from Current Price and Bid Volume.")
         else:
             df['Current Baseline Spend'] = df['AST Baseline Spend']
+            logger.warning("Current Baseline Spend not found; using AST Baseline Spend instead.")
 
-    # 'Current Savings'
+    # For Current Savings, check for alternate column then rename it
     if 'Current Savings' not in df.columns:
-        df['Current Savings'] = df['Current Baseline Spend'] - df['Awarded Supplier Spend']
+        if 'Current Price Savings' in df.columns:
+            df = df.rename(columns={'Current Price Savings': 'Current Savings'})
+            logger.info("Renamed 'Current Price Savings' to 'Current Savings'.")
+        else:
+            df['Current Savings'] = df['Current Baseline Spend'] - df['Awarded Supplier Spend']
+            logger.debug("Calculated Current Savings as Current Baseline Spend minus Awarded Supplier Spend.")
 
-    # Ensure 'Awarded Volume' exists
+    # Ensure required columns exist
     if 'Awarded Volume' not in df.columns:
         if 'Bid Volume' in df.columns:
             df['Awarded Volume'] = df['Bid Volume']
+            logger.debug("Set Awarded Volume equal to Bid Volume.")
         else:
             df['Awarded Volume'] = 0
+            logger.warning("Awarded Volume not found; set to 0.")
 
-    # Ensure 'Incumbent' exists
     if 'Incumbent' not in df.columns:
         df['Incumbent'] = 'Unknown'
+        logger.debug("Incumbent column not found; set to 'Unknown'.")
 
-    # Ensure 'Bid ID' exists
     if 'Bid ID' not in df.columns:
         df['Bid ID'] = df.index
+        logger.warning("Bid ID column not found; using DataFrame index as Bid ID.")
 
-    # Check expected columns
+    # For any expected (non-grouping) column missing, fill with 0
     for col in expected_columns:
         if col not in df.columns:
             if col == scenario_detail_grouping and require_grouping:
-                # If grouping is required but not found, raise error
+                logger.error("Required grouping column '%s' not found.", scenario_detail_grouping)
                 raise ValueError(f"Required grouping column '{scenario_detail_grouping}' not found in data.")
             else:
-                # For non-grouping columns, just fill with 0 if not found
                 df[col] = 0
+                logger.warning("Column '%s' missing; filled with 0.", col)
+
+    # Convert savings columns to numeric to avoid type issues
+    df['AST Savings'] = pd.to_numeric(df['AST Savings'], errors='coerce').fillna(0)
+    df['Current Savings'] = pd.to_numeric(df['Current Savings'], errors='coerce').fillna(0)
+
+    # Log key metrics
+    unique_bid_ids = df['Bid ID'].nunique()
+    total_ast_savings = df['AST Savings'].sum()
+    total_current_savings = df['Current Savings'].sum()
+    logger.info("Processed DataFrame: %d unique Bid IDs.", unique_bid_ids)
+    logger.info("Total AST Savings: $%s", format_currency_in_millions(total_ast_savings))
+    logger.info("Total Current Savings: $%s", format_currency_in_millions(total_current_savings))
 
     return df
+
+
 
 def create_scenario_summary_slides(prs, scenario_dataframes, scenario_detail_grouping, title_suffix="", create_details=True, logger=logger):
     """

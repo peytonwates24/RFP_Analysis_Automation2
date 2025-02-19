@@ -1364,9 +1364,11 @@ def main():
                                         # Attempt to merge from original_df
                                         if original_df is not None and 'Bid ID' in original_df.columns:
                                             if scenario_detail_grouping in original_df.columns:
+                                                # Create a unique mapping for the grouping field: one row per Bid ID
+                                                original_unique = original_df[['Bid ID', scenario_detail_grouping]].drop_duplicates(subset=['Bid ID'])
                                                 df['Bid ID'] = df['Bid ID'].astype(str)
-                                                original_df['Bid ID'] = original_df['Bid ID'].astype(str)
-                                                df = df.merge(original_df[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
+                                                original_unique['Bid ID'] = original_unique['Bid ID'].astype(str)
+                                                df = df.merge(original_unique, on='Bid ID', how='left')
                                                 if scenario_detail_grouping not in df.columns:
                                                     st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into '{sheet_name}'. Skipping this scenario.")
                                                     continue
@@ -1383,9 +1385,11 @@ def main():
                                             # Attempt to merge from original_df
                                             if original_df is not None and 'Bid ID' in original_df.columns:
                                                 if scenario_summary_selections in original_df.columns:
+                                                    # Create a unique mapping for the sub-summary field: one row per Bid ID
+                                                    original_unique = original_df[['Bid ID', scenario_summary_selections]].drop_duplicates(subset=['Bid ID'])
                                                     df['Bid ID'] = df['Bid ID'].astype(str)
-                                                    original_df['Bid ID'] = original_df['Bid ID'].astype(str)
-                                                    df = df.merge(original_df[['Bid ID', scenario_summary_selections]], on='Bid ID', how='left')
+                                                    original_unique['Bid ID'] = original_unique['Bid ID'].astype(str)
+                                                    df = df.merge(original_unique, on='Bid ID', how='left')
                                                     if scenario_summary_selections not in df.columns:
                                                         st.warning(f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. Sub-summaries may not be created.")
                                                 else:
@@ -1415,6 +1419,7 @@ def main():
                                 ppt_data = None  # Ensure ppt_data is set to None if generation fails
                         else:
                             ppt_data = None  # No presentations selected
+
 
 
 
