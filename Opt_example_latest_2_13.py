@@ -6,7 +6,7 @@ import pulp
 #############################################
 # DEFAULT DATA (used if no file is uploaded)
 #############################################
-
+# Random note
 # Define suppliers (fixed for our example)
 suppliers = ['A', 'B', 'C']
 
