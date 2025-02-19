@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import os
-from modules.config import logger, BASE_PROJECTS_DIR, config
-from modules.authentication import authenticate_user
-from modules.utils import normalize_columns, validate_uploaded_file
-from modules.data_loader import load_baseline_data, start_process
+from modules.config import *
+from modules.authentication import *
+from modules.utils import *
+from modules.data_loader import *
 from modules.analysis import *
 from modules.presentations import *
-from modules.projects import get_user_projects, create_project, delete_project
+from modules.projects import *
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.workbook.defined_name import DefinedName
@@ -16,6 +16,34 @@ from openpyxl.styles import Font
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string
 from pptx import Presentation
+from supabase import create_client, Client  # New import
+import logging
+import uuid 
+
+# testxd
+# # Configure logging
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+
+# # Initialize Supabase client
+# @st.cache_resource
+# def init_supabase_client():
+#     url = st.secrets["SUPABASE_URL"]
+#     key = st.secrets["SUPABASE_KEY"]
+#     return create_client(url, key)
+
+# supabase: Client = init_supabase_client()
+
+# # Define Storage Bucket and Database Table from secrets
+# STORAGE_BUCKET = st.secrets["SUPABASE_STORAGE_BUCKET"]
+# DB_TABLE = st.secrets.get("SUPABASE_DB_TABLE", "uploaded_files")  # Defaults to 'uploaded_files' if not set
+
+# # Debug: Display storage bucket and table
+# st.write(f"Storage Bucket: {STORAGE_BUCKET}")
+# st.write(f"Database Table: {DB_TABLE}")
+# st.write(f"Supabase Client Initialized: {supabase is not None}")
+
+
 
 def apply_custom_css():
     """Apply custom CSS for styling the app."""
@@ -136,8 +164,8 @@ def main():
         navigate_to('upload')
     if st.sidebar.button('My Projects'):
         navigate_to('analysis')
-    if st.sidebar.button('Dashboards'):
-        navigate_to('dashboards')
+    if st.sidebar.button('Upload Database'):
+        navigate_to('upload database')
     if st.sidebar.button('About'):
         navigate_to('about')
 
@@ -414,30 +442,71 @@ def main():
             selected_presentations = st.multiselect("Presentation Summaries", options=presentation_options)
 
 
-
             # Exclusion rules for Best of Best Excluding Suppliers
             if "Best of Best Excluding Suppliers" in analyses_to_run:
                 with st.expander("Configure Exclusion Rules for Best of Best Excluding Suppliers"):
                     st.header("Exclusion Rules for Best of Best Excluding Suppliers")
 
-                    supplier_name = st.selectbox("Select Supplier to Exclude", st.session_state.merged_data['Awarded Supplier'].unique(), key="supplier_name_excl_bob")
-                    field = st.selectbox("Select Field for Rule", st.session_state.merged_data.columns, key="field_excl_bob")
-                    logic = st.selectbox("Select Logic (Equal to or Not equal to)", ["Equal to", "Not equal to"], key="logic_excl_bob")
-                    value = st.selectbox("Select Value", st.session_state.merged_data[field].unique(), key="value_excl_bob")
+                    # Select Supplier to Exclude
+                    supplier_name = st.selectbox(
+                        "Select Supplier to Exclude",
+                        st.session_state.merged_data['Awarded Supplier'].dropna().unique(),
+                        key="supplier_name_excl_bob"
+                    )
+
+                    # Select Field for Rule
+                    field = st.selectbox(
+                        "Select Field for Rule",
+                        st.session_state.merged_data.columns.drop('Awarded Supplier'),  # Exclude 'Awarded Supplier' if necessary
+                        key="field_excl_bob"
+                    )
+
+                    # Select Logic
+                    logic = st.selectbox(
+                        "Select Logic (Equal to or Not equal to)",
+                        ["Equal to", "Not equal to"],
+                        key="logic_excl_bob"
+                    )
+
+                    # Select Value based on chosen field
+                    unique_values = st.session_state.merged_data[field].dropna().unique()
+
+                    if unique_values.size > 0:
+                        value = st.selectbox(
+                            "Select Value",
+                            unique_values,
+                            key="value_excl_bob"
+                        )
+                    else:
+                        value = st.selectbox(
+                            "Select Value",
+                            options=[0],  # You can change 0 to any default value you prefer
+                            index=0,
+                            key="value_excl_bob"
+                        )
+
+
+                    # Checkbox to exclude all Bid IDs from the supplier
                     exclude_all = st.checkbox("Exclude from all Bid IDs", key="exclude_all_excl_bob")
 
+                    # Button to add exclusion rule
                     if st.button("Add Exclusion Rule", key="add_excl_bob"):
                         if 'exclusions_bob' not in st.session_state:
                             st.session_state.exclusions_bob = []
+                        # Append the exclusion rule as a tuple
                         st.session_state.exclusions_bob.append((supplier_name, field, logic, value, exclude_all))
                         logger.debug(f"Added exclusion rule for BOB Excl Suppliers: {supplier_name}, {field}, {logic}, {value}, Exclude All: {exclude_all}")
+                        st.success("Exclusion rule added successfully!")
 
+                    # Button to clear all exclusion rules
                     if st.button("Clear Exclusion Rules", key="clear_excl_bob"):
                         st.session_state.exclusions_bob = []
                         logger.debug("Cleared all exclusion rules for BOB Excl Suppliers.")
+                        st.success("All exclusion rules cleared.")
 
+                    # Display current exclusion rules
                     if 'exclusions_bob' in st.session_state and st.session_state.exclusions_bob:
-                        st.write("Current Exclusion Rules for Best of Best Excluding Suppliers:")
+                        st.write("**Current Exclusion Rules for Best of Best Excluding Suppliers:**")
                         for i, excl in enumerate(st.session_state.exclusions_bob):
                             st.write(f"{i + 1}. Supplier: {excl[0]}, Field: {excl[1]}, Logic: {excl[2]}, Value: {excl[3]}, Exclude All: {excl[4]}")
 
@@ -605,6 +674,10 @@ def main():
                                     as_is_df = as_is_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                                     as_is_df = add_missing_bid_ids(as_is_df, original_merged_data, st.session_state.column_mapping, 'As-Is')
                                     as_is_df.to_excel(writer, sheet_name='#As-Is', index=False)
+                                    if 'Baseline Savings' in as_is_df.columns:
+                                        logger.info("[CHECKPOINT] As-Is 'Baseline Savings' sample: %s", as_is_df['Baseline Savings'].head(5).tolist())
+                                    else:
+                                        logger.warning("As-Is DF has no 'Baseline Savings' column. Columns = %s", as_is_df.columns.tolist())
                                     logger.info("As-Is analysis completed.")
 
                                 # --- Best of Best Analysis ---
@@ -612,24 +685,49 @@ def main():
                                     best_of_best_df = best_of_best_analysis(st.session_state.merged_data, st.session_state.column_mapping)
                                     best_of_best_df = add_missing_bid_ids(best_of_best_df, original_merged_data, st.session_state.column_mapping, 'Best of Best')
                                     best_of_best_df.to_excel(writer, sheet_name='#Best of Best', index=False)
+                                    if 'Baseline Savings' in best_of_best_df.columns:
+                                         logger.info("[CHECKPOINT] Best-of-Best 'Baseline Savings' sample: %s", best_of_best_df['Baseline Savings'].head(5).tolist())
                                     logger.info("Best of Best analysis completed.")
 
                                 # --- Best of Best Excluding Suppliers Analysis ---
                                 if "Best of Best Excluding Suppliers" in analyses_to_run:
+                                    # Retrieve exclusion rules from session state, or use an empty list
                                     exclusions_list_bob = st.session_state.exclusions_bob if 'exclusions_bob' in st.session_state else []
-                                    best_of_best_excl_df = best_of_best_excluding_suppliers(
-                                        st.session_state.merged_data, 
-                                        st.session_state.column_mapping, 
-                                        exclusions_list_bob
-                                    )
-                                    best_of_best_excl_df = add_missing_bid_ids(
-                                        best_of_best_excl_df, 
-                                        original_merged_data, 
-                                        st.session_state.column_mapping, 
-                                        'BOB Excl Suppliers'
-                                    )
-                                    best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
-                                    logger.info("Best of Best Excluding Suppliers analysis completed.")
+                                    
+                                    # Ensure column names are stripped of leading/trailing spaces
+                                    st.session_state.merged_data.columns = st.session_state.merged_data.columns.str.strip()
+                                    
+                                    # Call the updated best_of_best_excluding_suppliers function with column_mapping
+                                    try:
+                                        best_of_best_excl_df = best_of_best_excluding_suppliers(
+                                            data=st.session_state.merged_data, 
+                                            column_mapping=st.session_state.column_mapping, 
+                                            excluded_conditions=exclusions_list_bob
+                                        )
+                                    except ValueError as ve:
+                                        st.error(f"Error in Best of Best Excluding Suppliers Analysis: {ve}")
+                                        logger.error(f"Best of Best Excluding Suppliers Analysis failed: {ve}")
+                                    else:
+                                        # Call add_missing_bid_ids with column_mapping
+                                        try:
+                                            best_of_best_excl_df = add_missing_bid_ids(
+                                                best_of_best_excl_df, 
+                                                original_merged_data, 
+                                                st.session_state.column_mapping, 
+                                                'BOB Excl Suppliers'
+                                            )
+                                        except Exception as e:
+                                            st.error(f"Error in adding missing Bid IDs: {e}")
+                                            logger.error(f"Adding Missing Bid IDs failed: {e}")
+                                        else:
+                                            # Export the result to Excel
+                                            try:
+                                                best_of_best_excl_df.to_excel(writer, sheet_name='#BOB Excl Suppliers', index=False)
+                                                logger.info("Best of Best Excluding Suppliers analysis completed successfully.")
+                                                st.success("Best of Best Excluding Suppliers analysis completed and exported to Excel.")
+                                            except Exception as e:
+                                                st.error(f"Error exporting Best of Best Excluding Suppliers Analysis to Excel: {e}")
+                                                logger.error(f"Exporting to Excel failed: {e}")
 
                                 # --- As-Is Excluding Suppliers Analysis ---
                                 if "As-Is Excluding Suppliers" in analyses_to_run:
@@ -1316,6 +1414,12 @@ def main():
                                 scenario_dataframes = {}
                                 for sheet_name in scenario_sheet_names:
                                     df = pd.read_excel(scenario_excel_file, sheet_name=sheet_name)
+                                            # Log a sample of "Savings" to see if it changed after saving/reading.
+                                    if 'Baseline Savings' in df.columns:
+                                        logger.info("[CHECKPOINT] After re-reading '%s': 'Baseline Savings' sample: %s",
+                                                    sheet_name, df['Baseline Savings'].head(5).tolist())
+                                    else:
+                                        logger.warning("Sheet '%s' has no 'Baseline Savings' column. Columns = %s", sheet_name, df.columns.tolist())
                                     scenario_dataframes[sheet_name] = df
                                 scenario_sheets_loaded = True
                             except Exception as e:
@@ -1359,24 +1463,55 @@ def main():
                                         st.error(f"'Bid ID' is not present in the scenario data for '{sheet_name}'. Skipping this sheet.")
                                         continue  # Skip this scenario
 
-                                    # Merge scenario_detail_grouping if required
+                                    # -----------------------------------------------------------------
+                                    # Merge scenario_detail_grouping if required (Option D approach):
+                                    # -----------------------------------------------------------------
                                     if scenario_detail_grouping and scenario_detail_grouping not in df.columns:
-                                        # Attempt to merge from original_df
+                                        # Attempt to pull grouping from original_df, but ensuring one row per Bid ID
                                         if original_df is not None and 'Bid ID' in original_df.columns:
                                             if scenario_detail_grouping in original_df.columns:
+
                                                 # Create a unique mapping for the grouping field: one row per Bid ID
                                                 original_unique = original_df[['Bid ID', scenario_detail_grouping]].drop_duplicates(subset=['Bid ID'])
                                                 df['Bid ID'] = df['Bid ID'].astype(str)
                                                 original_unique['Bid ID'] = original_unique['Bid ID'].astype(str)
                                                 df = df.merge(original_unique, on='Bid ID', how='left')
+
+                                                # 1) Make sure both have str Bid ID
+                                                df['Bid ID'] = df['Bid ID'].astype(str)
+                                                original_df['Bid ID'] = original_df['Bid ID'].astype(str)
+                                                # 2) Build a unique_map from original_df to pick the FIRST non-blank grouping row
+                                                unique_map = (
+                                                    original_df.copy()
+                                                    .assign(
+                                                        _blank=lambda x: (
+                                                            x[scenario_detail_grouping].isna() 
+                                                            | (x[scenario_detail_grouping] == "")
+                                                        )
+                                                    )
+                                                    # Sort so that non-blanks (_blank=False) come first, blanks go last
+                                                    .sort_values("_blank")
+                                                    # Then group by Bid ID, keep only the first row
+                                                    .groupby("Bid ID", as_index=False)
+                                                    .first()
+                                                )
+                                                # 3) Merge that single row per Bid ID
+                                                df = df.merge(unique_map[['Bid ID', scenario_detail_grouping]], on='Bid ID', how='left')
+              
                                                 if scenario_detail_grouping not in df.columns:
                                                     st.error(f"Failed to merge the grouping field '{scenario_detail_grouping}' into '{sheet_name}'. Skipping this scenario.")
                                                     continue
                                             else:
-                                                st.warning(f"The selected grouping field '{scenario_detail_grouping}' is not in 'original_merged_data'. No detail slides will be created for '{sheet_name}'.")
+                                                st.warning(
+                                                    f"The selected grouping field '{scenario_detail_grouping}' is not in 'original_merged_data'. "
+                                                    "No detail slides will be created for this scenario."
+                                                )
                                                 # It's okay to proceed without details if user still wants scenario summary slides
                                         else:
-                                            st.warning("The 'original_merged_data' is not available or 'Bid ID' missing in 'original_merged_data'. Cannot merge grouping.")
+                                            st.warning(
+                                                "The 'original_merged_data' is not available or 'Bid ID' is missing in 'original_merged_data'. "
+                                                f"Cannot merge grouping for '{sheet_name}'."
+                                            )
                                             # We can still proceed without scenario details
 
                                     # Merge scenario_summary_selections if sub-summaries are on and the column not present
@@ -1388,15 +1523,33 @@ def main():
                                                     # Create a unique mapping for the sub-summary field: one row per Bid ID
                                                     original_unique = original_df[['Bid ID', scenario_summary_selections]].drop_duplicates(subset=['Bid ID'])
                                                     df['Bid ID'] = df['Bid ID'].astype(str)
+
                                                     original_unique['Bid ID'] = original_unique['Bid ID'].astype(str)
                                                     df = df.merge(original_unique, on='Bid ID', how='left')
-                                                    if scenario_summary_selections not in df.columns:
-                                                        st.warning(f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. Sub-summaries may not be created.")
-                                                else:
-                                                    st.warning(f"The sub-summary field '{scenario_summary_selections}' is not in 'original_merged_data'. No sub-summaries for '{sheet_name}'.")
-                                            else:
-                                                st.warning("The 'original_merged_data' is not available or 'Bid ID' missing for merging sub-summary selections.")
 
+                                                    original_df['Bid ID'] = original_df['Bid ID'].astype(str)
+                                                    df = df.merge(
+                                                        original_df[['Bid ID', scenario_summary_selections]], 
+                                                        on='Bid ID', 
+                                                        how='left'
+                                                    )
+
+                                                    if scenario_summary_selections not in df.columns:
+                                                        st.warning(
+                                                            f"Failed to merge the sub-summary field '{scenario_summary_selections}' into '{sheet_name}'. "
+                                                            "Sub-summaries may not be created."
+                                                        )
+                                                else:
+                                                    st.warning(
+                                                        f"The sub-summary field '{scenario_summary_selections}' is not in 'original_merged_data'. "
+                                                        f"No sub-summaries for '{sheet_name}'."
+                                                    )
+                                            else:
+                                                st.warning(
+                                                    "The 'original_merged_data' is not available or 'Bid ID' missing for merging sub-summary selections."
+                                                )
+
+                                    # Store in scenario_dataframes
                                     scenario_dataframes[sheet_name] = df
 
                                 if not scenario_dataframes:
@@ -1404,6 +1557,15 @@ def main():
                                     ppt_data = None  # Ensure ppt_data is set to None if generation fails
                                 else:
                                     # Generate the presentation (this now includes sub-summaries if toggled on)
+
+                                    for sn, df in scenario_dataframes.items():
+                                        if 'Baseline Savings' in df.columns:
+                                            logger.info("[CHECKPOINT] Pre-PPT '%s': 'Baseline Savings' sample: %s",
+                                                        sn, df['Baseline Savings'].head(5).tolist())
+                                        else:
+                                            logger.warning("[CHECKPOINT] Pre-PPT '%s' has no 'Baseline Savings' col. Columns: %s",
+                                                        sn, df.columns.tolist())
+
                                     prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path)
 
                                     if not prs:
@@ -1616,9 +1778,134 @@ def main():
             st.error("No project selected.")
             logger.error("No project selected.")
 
-    elif section == 'dashboards':
-        st.title('Dashboards')
-        st.write("This section is under construction.")
+
+    elif section == 'upload database':
+        st.title('Upload Database Files')
+        st.write("Upload your Excel files to Supabase.")
+        
+        # # File uploader allowing multiple files
+        # uploaded_files = st.file_uploader(
+        #     "Choose Excel files to upload",
+        #     type=["xlsx"],
+        #     accept_multiple_files=True,
+        #     key='upload_database_file_uploader'
+        # )
+        
+        # if uploaded_files:
+        #     for uploaded_file in uploaded_files:
+        #         if validate_uploaded_file(uploaded_file):
+        #             try:
+        #                 # Read file content
+        #                 file_bytes = uploaded_file.read()
+        #                 original_file_name = uploaded_file.name
+                        
+        #                 # Generate a unique file name
+        #                 unique_file_name = generate_unique_filename(original_file_name)
+                        
+        #                 # Upload the file to Supabase Storage
+        #                 upload_response = supabase.storage.from_(STORAGE_BUCKET).upload(unique_file_name, file_bytes)
+                        
+        #                 # Debugging statements
+        #                 st.write("Upload Response:", upload_response)
+        #                 st.write(f"Response Status: {upload_response.status}")
+        #                 st.write(f"Response Path: {upload_response.path}")
+        #                 st.write(f"Response Full Path: {upload_response.full_path}")
+                        
+        #                 # Check if the upload was successful
+        #                 if upload_response.status in [200, 201]:
+        #                     st.success(f"File '{unique_file_name}' uploaded successfully to Supabase Storage.")
+        #                     logger.info(f"File '{unique_file_name}' uploaded successfully to Supabase Storage.")
+                            
+        #                     # Read Excel file into a DataFrame
+        #                     excel_df = pd.read_excel(BytesIO(file_bytes), engine='openpyxl')
+                            
+        #                     # Add metadata columns
+        #                     excel_df['file_name'] = unique_file_name
+        #                     excel_df['uploaded_by'] = 'test_user'  # Replace with actual user info if available
+        #                     excel_df['upload_time'] = pd.Timestamp.now()
+                            
+        #                     # Ensure columns match the Supabase table
+        #                     required_columns = [
+        #                         'bid_id',
+        #                         'supplier_name',
+        #                         'facility',
+        #                         'baseline_price',
+        #                         'current_price',
+        #                         'bid_volume',
+        #                         'bid_price',
+        #                         'supplier_capacity',
+        #                         'file_name',
+        #                         'uploaded_by',
+        #                         'upload_time'
+        #                     ]
+        #                     # Filter DataFrame to include only required columns
+        #                     excel_df = excel_df[required_columns]
+                            
+        #                     # Convert DataFrame to list of dictionaries
+        #                     records = excel_df.to_dict(orient='records')
+                            
+        #                     # Insert records into Supabase table using upsert to handle duplicates
+        #                     insert_response = supabase.table(DB_TABLE).upsert(records, on_conflict='bid_id').execute()
+                            
+        #                     # Debug: Print the entire response
+        #                     st.write(f"Insert Response: {insert_response}")
+                            
+        #                     if insert_response.status in [200, 201]:
+        #                         st.success(f"Data from '{unique_file_name}' inserted into the database successfully.")
+        #                         logger.info(f"Data from '{unique_file_name}' inserted into the database successfully.")
+        #                     else:
+        #                         error_message = insert_response.error.get('message', 'Unknown error occurred.')
+        #                         st.error(f"Failed to insert data from '{unique_file_name}' into the database. Error: {error_message}")
+        #                         logger.error(f"Failed to insert data from '{unique_file_name}' into the database. Error: {error_message}")
+        #                 else:
+        #                     st.error(f"Failed to upload '{unique_file_name}' to Supabase Storage. Status Code: {upload_response.status}")
+        #                     logger.error(f"Failed to upload '{unique_file_name}' to Supabase Storage. Status Code: {upload_response.status}")
+                    
+        #             except Exception as e:
+        #                 st.error(f"An error occurred while uploading '{uploaded_file.name}': {e}")
+        #                 logger.error(f"An error occurred while uploading '{uploaded_file.name}': {e}")
+        #         else:
+        #             st.warning(f"File '{uploaded_file.name}' is invalid and was not uploaded.")
+        #             logger.warning(f"Invalid file '{uploaded_file.name}' attempted to be uploaded.")
+
+
+
+        # # Test Insert Button
+        # if st.button('Test Insert'):
+        #     try:
+        #         test_record = {
+        #             'bid_id': 'TEST_BID_001',
+        #             'supplier_name': 'Test Supplier',
+        #             'facility': 'Test Facility',
+        #             'baseline_price': 1000,
+        #             'current_price': 900,
+        #             'bid_volume': 50,
+        #             'bid_price': 950,
+        #             'supplier_capacity': 60,
+        #             'file_name': 'test_file.xlsx',
+        #             'uploaded_by': 'test_user',
+        #             'upload_time': pd.Timestamp.now().isoformat()  # Or datetime.datetime.utcnow().isoformat()
+        #         }
+
+
+        #         insert_response = supabase.table(DB_TABLE).upsert([test_record], on_conflict='bid_id').execute()
+
+        #         # Debug: Print the entire response
+        #         st.write(f"Test Insert Response: {insert_response}")
+
+        #         if insert_response.status in [200, 201]:
+        #             st.success("Test record inserted successfully.")
+        #             logger.info("Test record inserted successfully.")
+        #         else:
+        #             error_message = insert_response.error.get('message', 'Unknown error occurred.')
+        #             st.error(f"Failed to insert test record. Error: {error_message}")
+        #             logger.error(f"Failed to insert test record. Error: {error_message}")
+
+        #     except Exception as e:
+        #         st.error(f"An error occurred during test insertion: {e}")
+        #         logger.error(f"An error occurred during test insertion: {e}")
+
+
 
     elif section == 'about':
         st.title("About")

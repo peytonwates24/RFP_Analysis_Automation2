@@ -589,6 +589,15 @@ def create_scenario_summary_presentation(scenario_dataframes, template_file_path
     Creates a Presentation object based on the scenario DataFrames and a template file,
     including main scenario summaries and optional sub-summaries if toggled on.
     """
+    logger.info("[CHECKPOINT] Entering create_scenario_summary_presentation. Sheets = %s", list(scenario_dataframes.keys()))
+    # If you do any summation or final pivot of 'Savings':
+    for sn, df in scenario_dataframes.items():
+        if 'Baseline Savings' in df.columns:
+            total_savings = df['Baseline Savings'].sum()
+            logger.info("[CHECKPOINT] '%s' total_savings = %s", sn, total_savings)
+        else:
+            logger.warning("No 'Baseline Savings' col in '%s' for PPT summary", sn)
+
     try:
         if template_file_path and os.path.exists(template_file_path):
             prs = Presentation(template_file_path)
@@ -1040,28 +1049,44 @@ def add_scenario_detail_slide(prs, df, scenario_name, template_slide_layout_inde
 # ///// Bid Coverage Summary Helper Functions /////
 def create_bid_coverage_summary_slides(prs, df, bid_coverage_slides_grouping):
     # ----------------- Initial Setup -----------------
-    bid_id_col = st.session_state.column_mapping.get('Bid ID')
-    incumbent_col = st.session_state.column_mapping.get('Incumbent')
-    supplier_name_col = st.session_state.column_mapping.get('Supplier Name')
+    column_mapping = st.session_state.column_mapping
+
+    # Strip leading/trailing spaces from all column names
+    df.columns = df.columns.str.strip()
+
+    # Column mappings
+    bid_id_col = column_mapping.get('Bid ID')
+    incumbent_col = column_mapping.get('Incumbent')
+    supplier_name_col = column_mapping.get('Supplier Name')
+    bid_price_col = column_mapping.get('Bid Price')
+    bid_volume_col = column_mapping.get('Bid Volume')
+    baseline_price_col = column_mapping.get('Baseline Price')
+    supplier_capacity_col = column_mapping.get('Supplier Capacity')
+    awarded_supplier_col = column_mapping.get('Awarded Supplier', 'Awarded Supplier')
+    current_price_col = column_mapping.get('Current Price', None)
 
     # Validate column mappings
-    if not all([bid_id_col, incumbent_col, supplier_name_col]):
-        st.error("One or more required column mappings are missing.")
+    required_mappings = ['Bid ID', 'Incumbent', 'Supplier Name', 'Bid Price', 'Bid Volume', 'Baseline Price', 'Supplier Capacity']
+    missing_mappings = [key for key in required_mappings if column_mapping.get(key) not in df.columns]
+    if missing_mappings:
+        st.error(f"The following required columns are missing in the data: {', '.join(missing_mappings)}.")
         return prs
 
-    # Ensure 'Awarded Supplier' exists
-    awarded_supplier_col = 'Awarded Supplier'
+    # Ensure 'Awarded Supplier' exists using column mapping
     if awarded_supplier_col not in df.columns:
         df[awarded_supplier_col] = df[supplier_name_col]
 
+    # Ensure Bid ID is string type
     df[bid_id_col] = df[bid_id_col].astype(str)
 
+    # Retrieve and sort suppliers
     suppliers = df[supplier_name_col].dropna().unique().tolist()
     suppliers = sorted(suppliers)
     if not suppliers:
         st.error("No suppliers found in the data to generate Bid Coverage Summary slides.")
         return prs
 
+    # Retrieve and sort group values
     group_values = df[bid_coverage_slides_grouping].dropna().unique().tolist()
     group_values = sorted(group_values)
     if not group_values:
@@ -1070,35 +1095,59 @@ def create_bid_coverage_summary_slides(prs, df, bid_coverage_slides_grouping):
 
     all_items_label = "All Items"
 
-# ----------------- Slide 1: Bid Coverage by Grouping Type -----------------
-    def calc_supplier_stats(subset):
-        total_bids = subset[bid_id_col].nunique()
+    # ----------------- Slide 1: Bid Coverage by Grouping Type -----------------
+    def calc_supplier_stats(subset, column_mapping):
+        total_bids = subset[column_mapping['Bid ID']].nunique()
         supplier_stats = {}
         for sup in suppliers:
-            sup_data = subset[subset[supplier_name_col] == sup]
-            sup_bids = sup_data[bid_id_col].nunique()
+            sup_data = subset[subset[column_mapping['Supplier Name']] == sup]
+            sup_bids = sup_data[column_mapping['Bid ID']].nunique()
             coverage_pct = (sup_bids / total_bids * 100) if total_bids > 0 else 0.0
-            if all(col in sup_data.columns for col in ['Current Price', 'Bid Price', 'Bid Volume']):
-                sup_data_clean = sup_data.dropna(subset=['Current Price', 'Bid Price', 'Bid Volume'])
-                savings = ((sup_data_clean['Current Price'] - sup_data_clean['Bid Price']) * sup_data_clean['Bid Volume']).sum()
+            
+            # Retrieve mapped column names
+            bid_price = column_mapping['Bid Price']
+            bid_volume = column_mapping['Bid Volume']
+            current_price = column_mapping.get('Current Price', None)
+            
+            # Define required columns based on the availability of 'Current Price'
+            if current_price and current_price in sup_data.columns:
+                required_cols = [current_price, bid_price, bid_volume]
+            else:
+                required_cols = [bid_price, bid_volume]
+            
+            # Check if all required columns exist in sup_data
+            if all(col in sup_data.columns for col in required_cols):
+                sup_data_clean = sup_data.dropna(subset=required_cols)
+                if current_price:
+                    savings = ((sup_data_clean[current_price] - sup_data_clean[bid_price]) * sup_data_clean[bid_volume]).sum()
+                else:
+                    savings = 0
             else:
                 savings = 0
+            
             supplier_stats[sup] = {
                 'bids': sup_bids,
                 'coverage_pct': coverage_pct,
                 'savings': savings
             }
+        
         return total_bids, supplier_stats
+
+    # Calculate stats for All Items
+    all_total_bids, all_supplier_stats = calc_supplier_stats(df, column_mapping)
     
-    all_total_bids, all_supplier_stats = calc_supplier_stats(df)
+    # Calculate stats for each group
     group_supplier_results = {}
     for g in group_values:
         g_df = df[df[bid_coverage_slides_grouping] == g]
-        g_total_bids, g_supplier_stats = calc_supplier_stats(g_df)
+        g_total_bids, g_supplier_stats = calc_supplier_stats(g_df, column_mapping)
         group_supplier_results[g] = (g_total_bids, g_supplier_stats)
     
+    # Create Slide
     slide_layout1 = prs.slide_layouts[1]
     slide1 = prs.slides.add_slide(slide_layout1)
+    
+    # Remove all existing shapes from the slide
     for shape in list(slide1.shapes):
         sp = shape.element
         sp.getparent().remove(sp)
@@ -1150,7 +1199,7 @@ def create_bid_coverage_summary_slides(prs, df, bid_coverage_slides_grouping):
                 c_pct = supplier_stats[sup]['coverage_pct']
                 table1.cell(start_row + 1, i).text = f"{c_pct:.0f}%"
     
-        table1.cell(start_row + 2, 0).text = "Savings (Use Current)"
+        table1.cell(start_row + 2, 0).text = "Savings"
         table1.cell(start_row + 2, 1).text = ""
         if suppliers:
             for i, sup in enumerate(suppliers, start=2):
