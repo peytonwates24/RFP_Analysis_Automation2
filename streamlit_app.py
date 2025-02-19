@@ -971,124 +971,139 @@ def main():
 
 
 
+
+
             # === Scenario Optimizer Section ===
             with st.expander("Scenario Optimizer", expanded=False):
                 st.markdown("### Scenario Optimizer")
                 st.write("Define optional scenario optimization rules to adjust outcomes. Check the box below to enable the Scenario Optimizer and configure its rules.")
                 
                 if st.checkbox("Enable Scenario Optimizer", key="enable_scenario_optimizer"):
-                    # --- Grouping Column Selector (outside the form) ---
-                    if st.session_state.get("merged_data") is not None:
-                        grouping_columns = st.session_state.merged_data.columns.tolist()
-                        selected_grouping = st.selectbox(
-                            "Select Grouping Column (this determines the available subgroup values)",
-                            options=grouping_columns,
-                            key="rule_grouping_outside"
+                    # Row 1: Rule Type and Operator (side-by-side)
+                    col_rule = st.columns(2)
+                    with col_rule[0]:
+                        rule_type = st.selectbox(
+                            "Rule Type",
+                            options=[
+                                "# of Transitions", 
+                                "# of Suppliers Awarded", 
+                                "# of new Suppliers Awarded", 
+                                "# of Volume Awarded", 
+                                "% of Volume Awarded", 
+                                "Exclude From Bid"
+                            ],
+                            key="rule_type"
                         )
-                        # Immediately calculate unique values from the selected column.
-                        grouping_scope_options = st.session_state.merged_data[selected_grouping].dropna().unique().tolist()
-                    else:
-                        selected_grouping = ""
-                        grouping_scope_options = []
-                    
-                    # --- Rule Input Form ---
-                    with st.form(key="scenario_optimizer_form"):
-                        # Capacity Scope: Global or Per Item.
-                        capacity_scope = st.radio(
-                            "Select Capacity Scope",
-                            options=["Global", "Per Item"],
-                            key="capacity_scope"
-                        )
-                        
-                        # Rule Type and Operator in two columns.
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            rule_type = st.selectbox(
-                                "Rule Type",
-                                options=["% of Volume Awarded", "# of Facilities Awarded"],
-                                key="rule_type"
-                            )
-                        with col2:
+                    with col_rule[1]:
+                        # If rule type is "Exclude From Bid", force operator to "Equal to"
+                        if rule_type == "Exclude From Bid":
+                            operator = "Equal to"
+                            st.write("Operator: Equal to")
+                        else:
                             operator = st.selectbox(
                                 "Operator",
                                 options=["At Most", "At least", "Equal to"],
                                 key="rule_operator"
                             )
-                        
-                        # Manual rule input.
+                    
+                    # Row 2: Rule Input (dynamically adjust based on Rule Type)
+                    if rule_type == "% of Volume Awarded":
                         rule_input = st.number_input(
                             "Rule Input (%)",
                             min_value=0.0,
                             max_value=100.0,
                             value=0.0,
                             step=0.1,
-                            key="rule_input"
+                            key="rule_input_percentage"
                         )
-                        
-                        # Grouping Scope, now based on the grouping column selected outside.
-                        selected_grouping_scope = st.selectbox(
-                            "Select Grouping Scope",
-                            options=grouping_scope_options,
-                            key="rule_grouping_scope"
+                    elif rule_type == "Exclude From Bid":
+                        rule_input = None
+                        st.write("Rule Input: N/A for Exclude From Bid")
+                    else:
+                        rule_input = st.number_input(
+                            "Rule Input (number)",
+                            min_value=0,
+                            value=0,
+                            step=1,
+                            key="rule_input_whole"
                         )
-                        
-                        # Supplier Scope: from the mapped Supplier Name column.
-                        if (
-                            "merged_data" in st.session_state and 
-                            "column_mapping" in st.session_state and 
-                            st.session_state.column_mapping.get("Supplier Name")
-                        ):
-                            mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
-                            supplier_scope_options = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
+                    
+                    # Row 3: Grouping Column and Grouping Scope (side-by-side)
+                    col_group = st.columns(2)
+                    with col_group[0]:
+                        if st.session_state.get("merged_data") is not None:
+                            grouping_columns = st.session_state.merged_data.columns.tolist()
+                            selected_grouping = st.selectbox(
+                                "Select Grouping Column",
+                                options=grouping_columns,
+                                key="dynamic_grouping_column"
+                            )
                         else:
-                            supplier_scope_options = []
-                        selected_supplier_scope = st.selectbox(
-                            "Select Supplier Scope",
-                            options=supplier_scope_options,
-                            key="rule_supplier_scope"
-                        )
-                        
-                        submitted = st.form_submit_button("Add Rule")
-                        if submitted:
-                            new_rule = {
-                                "Capacity Scope": capacity_scope,
-                                "Rule Type": rule_type,
-                                "Operator": operator,
-                                "Rule Input (%)": rule_input,
-                                "Grouping Column": st.session_state.get("rule_grouping_outside", ""),
-                                "Grouping Scope": selected_grouping_scope,
-                                "Supplier Scope": selected_supplier_scope
-                            }
-                            if "scenario_rules" not in st.session_state:
-                                st.session_state["scenario_rules"] = []
-                            st.session_state["scenario_rules"].append(new_rule)
-                            st.success("Rule added.")
+                            selected_grouping = None
+                    with col_group[1]:
+                        if selected_grouping and st.session_state.get("merged_data") is not None:
+                            grouping_scope_options = st.session_state.merged_data[selected_grouping].dropna().unique().tolist()
+                            selected_grouping_scope = st.selectbox(
+                                "Select Grouping Scope",
+                                options=grouping_scope_options,
+                                key="dynamic_grouping_scope"
+                            )
+                        else:
+                            selected_grouping_scope = None
+                    
+                    # Row 4: Supplier Scope (from the mapped "Supplier Name" column)
+                    if (
+                        "merged_data" in st.session_state and 
+                        "column_mapping" in st.session_state and 
+                        st.session_state.column_mapping.get("Supplier Name")
+                    ):
+                        mapped_supplier_col = st.session_state.column_mapping.get("Supplier Name")
+                        supplier_scope_options = st.session_state.merged_data[mapped_supplier_col].dropna().unique().tolist()
+                    else:
+                        supplier_scope_options = []
+                    selected_supplier_scope = st.selectbox(
+                        "Select Supplier Scope",
+                        options=supplier_scope_options,
+                        key="rule_supplier_scope"
+                    )
+                    
+                    # Add Rule Button
+                    if st.button("Add Rule", key="add_rule_button"):
+                        new_rule = {
+                            "Rule Type": rule_type,
+                            "Operator": operator,
+                            "Rule Input": rule_input,
+                            "Grouping Column": selected_grouping,
+                            "Grouping Scope": selected_grouping_scope,
+                            "Supplier Scope": selected_supplier_scope
+                        }
+                        if "scenario_rules" not in st.session_state:
+                            st.session_state["scenario_rules"] = []
+                        st.session_state["scenario_rules"].append(new_rule)
+                        st.success("Rule added.")
                     
                     # ---- Display Added Rules with Descriptions ----
                     st.markdown("#### Added Rules")
                     if "scenario_rules" in st.session_state and st.session_state["scenario_rules"]:
                         for idx, rule in enumerate(st.session_state["scenario_rules"]):
-                            if rule.get("Capacity Scope", "").strip().lower() == "global":
-                                scope_desc = "Globally"
+                            # Build a descriptive sentence based on the rule.
+                            if rule["Rule Type"] == "Exclude From Bid":
+                                description = (f"Exclude from bid for '{rule['Grouping Scope']}' for Supplier {rule['Supplier Scope']}.")
+                            elif rule["Rule Type"].startswith("%"):
+                                description = (f"{rule['Operator']} {rule['Rule Input']}% of Volume Awarded for '{rule['Grouping Scope']}' is awarded to Supplier {rule['Supplier Scope']}.")
                             else:
-                                scope_desc = "Per item"
-                            
-                            if rule["Rule Type"] == "% of Volume Awarded":
-                                description = (f"{scope_desc}, {rule['Operator']} {rule['Rule Input (%)']}% of Volume Awarded "
-                                               f"for {rule['Grouping Scope']} is awarded to Supplier {rule['Supplier Scope']}.")
-                            elif rule["Rule Type"] == "# of Facilities Awarded":
-                                description = (f"{scope_desc}, {rule['Operator']} {rule['Rule Input (%)']} facilities in "
-                                               f"{rule['Grouping Scope']} are awarded to Supplier {rule['Supplier Scope']}.")
-                            else:
-                                description = (f"{scope_desc}, {rule['Operator']} {rule['Rule Input (%)']}% rule on {rule['Rule Type']} "
-                                               f"in {rule['Grouping Scope']} for Supplier {rule['Supplier Scope']}.")
-                            
+                                description = (f"{rule['Operator']} {rule['Rule Input']} (number) of {rule['Rule Type']} for '{rule['Grouping Scope']}' is awarded to Supplier {rule['Supplier Scope']}.")
                             st.write(f"**Rule {idx+1}:** {description}")
                             if st.button(f"Remove Rule {idx+1}", key=f"remove_rule_{idx}"):
                                 st.session_state["scenario_rules"].pop(idx)
                                 st.success("Rule removed. Please refresh the page if necessary.")
                     else:
                         st.write("No rules added yet.")
+
+
+
+
+
 
 
             # Exclusion rules for Best of Best Excluding Suppliers
