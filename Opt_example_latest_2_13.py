@@ -25,16 +25,16 @@ default_item_attributes = {
 }
 
 default_price = {
-    ('A', '1'): 5, ('A', '2'): 7, ('A', '3'): 5,
+    ('A', '1'): 50, ('A', '2'): 70, ('A', '3'): 55,
     ('B', '1'): 60, ('B', '2'): 80, ('B', '3'): 65,
     ('C', '1'): 55, ('C', '2'): 75, ('C', '3'): 60,
-    ('A', '4'): 2, ('A', '5'): 5, ('A', '6'): 4,
+    ('A', '4'): 23, ('A', '5'): 54, ('A', '6'): 42,
     ('B', '4'): 75, ('B', '5'): 34, ('B', '6'): 24,
     ('C', '4'): 24, ('C', '5'): 24, ('C', '6'): 64,
-    ('A', '7'): 232, ('A', '8'): 75, ('A', '9'): 9,
+    ('A', '7'): 23, ('A', '8'): 75, ('A', '9'): 97,
     ('B', '7'): 53, ('B', '8'): 13, ('B', '9'): 56,
-    ('C', '7'): 86, ('C', '8'): 24, ('C', '9'): 134,
-    ('A', '10'): 6, ('B', '10'): 13, ('C', '10'): 75
+    ('C', '7'): 86, ('C', '8'): 24, ('C', '9'): 13,
+    ('A', '10'): 64, ('B', '10'): 13, ('C', '10'): 75
 }
 
 default_demand = {
@@ -45,7 +45,7 @@ default_demand = {
 default_rebate_tiers = {
     'A': [(0, 500, 0.0, None, None), (500, float('inf'), 0.10, None, None)],
     'B': [(0, 500, 0.0, None, None), (500, float('inf'), 0.05, "Capacity Group", "Gadgets")],
-    'C': [(0, 700, 0.0, None, None), (700, float('inf'), 0.08, "Capacity Group", "Widgets")]
+    'C': [(0, 700, 0.0, None, None), (700, float('inf'), 0.07, "Capacity Group", "Widgets")]
 }
 
 default_discount_tiers = {
@@ -60,15 +60,22 @@ default_baseline_price = {
 }
 
 default_per_item_capacity = {
-    ('A', '1'): 500, ('A', '2'): 400, ('A', '3'): 300,
-    ('B', '1'): 400, ('B', '2'): 800, ('B', '3'): 600,
-    ('C', '1'): 300, ('C', '2'): 500, ('C', '3'): 700
+    ('A', '1'): 5000, ('A', '2'): 4000, ('A', '3'): 3000,
+    ('B', '1'): 4000, ('B', '2'): 8000, ('B', '3'): 6000,
+    ('C', '1'): 3000, ('C', '2'): 5000, ('C', '3'): 7000,
+    ('A', '4'): 5000, ('A', '5'): 4000, ('A', '6'): 3000,
+    ('B', '4'): 4000, ('B', '5'): 8000, ('B', '6'): 6000,
+    ('C', '4'): 3000, ('C', '5'): 5000, ('C', '6'): 7000,
+    ('C', '7'): 3000, ('C', '8'): 5000, ('C', '9'): 7000,
+    ('A', '7'): 5000, ('A', '8'): 4000, ('A', '9'): 3000,
+    ('B', '7'): 4000, ('B', '8'): 8000, ('B', '9'): 6000,
+    ('A', '10'): 3000, ('B', '10'): 5000, ('C', '10'): 7000
 }
 
 default_global_capacity_df = pd.DataFrame({
     "Supplier Name": ["A", "A", "B", "B", "C", "C"],
     "Capacity Group": ["Widgets", "Gadgets", "Widgets", "Gadgets", "Widgets", "Gadgets"],
-    "Capacity": [10000, 900, 12000, 11000, 1500, 3000]
+    "Capacity": [100000, 90000, 12000, 11000, 150000, 300000]
 })
 default_global_capacity = {
     (str(row["Supplier Name"]).strip(), str(row["Capacity Group"]).strip()): row["Capacity"]
@@ -101,7 +108,7 @@ epsilon = 1e-6
 #############################################
 def run_optimization(use_global, capacity_data, demand_data, item_attr_data, price_data,
                      rebate_tiers, discount_tiers, baseline_price_data, rules=[]):
-    # Create a binary transition variable T[j,s] for each bid j and each non-incumbent supplier.
+    # Create binary transition variables T[j,s] for each bid j and each non-incumbent supplier.
     items_dynamic = list(demand_data.keys())
     T = {}
     for j in items_dynamic:
@@ -120,7 +127,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     S = {s: pulp.LpVariable(f"S_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     V = {s: pulp.LpVariable(f"V_{s}", lowBound=0, cat='Continuous') for s in suppliers}
 
-    # Enforce transitions: for each bid j and each supplier s not equal to incumbent, if x[s,j] > 0 then T[j,s] = 1.
+    # Enforce transitions: if a non-incumbent is awarded on bid j then T[j,s] = 1.
     for j in items_dynamic:
         for s in suppliers:
             if (j, s) in T:
@@ -246,6 +253,32 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 lp_problem += lhs <= percentage * total_vol, f"Rule_{r_idx}"
             elif operator == "Exactly":
                 lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
+        elif rule["rule_type"] == "# of Volume Awarded":
+            grouping = rule["grouping"]
+            if grouping == "All":
+                items_group = items_dynamic
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(grouping, "")).strip() == str(rule["grouping_scope"]).strip()]
+            try:
+                volume_target = float(rule["rule_input"])
+            except:
+                continue
+            operator = rule["operator"]
+            if rule["supplier_scope"] in ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier"]:
+                if rule["supplier_scope"] == "New Suppliers":
+                    lhs = pulp.lpSum(x[(s, j)] for j in items_group for s in suppliers if s != item_attr_data[j].get("Incumbent"))
+                elif rule["supplier_scope"] == "Lowest cost supplier":
+                    lhs = pulp.lpSum(x[(lowest_cost_supplier[j], j)] for j in items_group)
+                elif rule["supplier_scope"] == "Second Lowest Cost Supplier":
+                    lhs = pulp.lpSum(x[(second_lowest_cost_supplier[j], j)] for j in items_group)
+            else:
+                lhs = pulp.lpSum(x[(rule["supplier_scope"], j)] for j in items_group)
+            if operator == "At least":
+                lp_problem += lhs >= volume_target, f"Rule_{r_idx}"
+            elif operator == "At most":
+                lp_problem += lhs <= volume_target, f"Rule_{r_idx}"
+            elif operator == "Exactly":
+                lp_problem += lhs == volume_target, f"Rule_{r_idx}"
         elif rule["rule_type"] == "# of transitions":
             grouping = rule["grouping"]
             if grouping == "All":
@@ -270,8 +303,51 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 items_group = items_dynamic
             else:
                 items_group = [j for j in items_dynamic if str(item_attr_data[j].get(grouping, "")).strip() == str(rule["grouping_scope"]).strip()]
-            for j in items_group:
-                lp_problem += x[(rule["supplier_scope"], j)] == 0, f"Exclusion_{r_idx}_{j}"
+            if rule["supplier_scope"] in ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier"]:
+                if rule["supplier_scope"] == "New Suppliers":
+                    for j in items_group:
+                        incumbent = item_attr_data[j].get("Incumbent")
+                        for s in suppliers:
+                            if s != incumbent:
+                                lp_problem += x[(s, j)] == 0, f"Exclusion_{r_idx}_{j}_{s}"
+                elif rule["supplier_scope"] == "Lowest cost supplier":
+                    for j in items_group:
+                        s = lowest_cost_supplier.get(j, None)
+                        if s is not None:
+                            lp_problem += x[(s, j)] == 0, f"Exclusion_{r_idx}_{j}"
+                elif rule["supplier_scope"] == "Second Lowest Cost Supplier":
+                    for j in items_group:
+                        s = second_lowest_cost_supplier.get(j, None)
+                        if s is not None:
+                            lp_problem += x[(s, j)] == 0, f"Exclusion_{r_idx}_{j}"
+            else:
+                for j in items_group:
+                    lp_problem += x[(rule["supplier_scope"], j)] == 0, f"Exclusion_{r_idx}_{j}"
+        elif rule["rule_type"] == "# of suppliers":
+            # New rule: limit the number of unique suppliers awarded in the specified grouping.
+            grouping = rule["grouping"]
+            if grouping == "All":
+                items_group = items_dynamic
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(grouping, "")).strip() == str(rule["grouping_scope"]).strip()]
+            try:
+                supplier_target = int(rule["rule_input"])
+            except:
+                continue
+            operator = rule["operator"]
+            # For this rule, we create new binary variables w_{r_idx, s} for each supplier.
+            w = {}
+            M = 1e9
+            for s in suppliers:
+                w[s] = pulp.LpVariable(f"w_{r_idx}_{s}", cat='Binary')
+                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * w[s], f"SupplierIndicator_{r_idx}_{s}"
+            total_suppliers = pulp.lpSum(w[s] for s in suppliers)
+            if operator == "At least":
+                lp_problem += total_suppliers >= supplier_target, f"Rule_{r_idx}"
+            elif operator == "At most":
+                lp_problem += total_suppliers <= supplier_target, f"Rule_{r_idx}"
+            elif operator == "Exactly":
+                lp_problem += total_suppliers == supplier_target, f"Rule_{r_idx}"
 
     lp_problem.solve()
     model_status = pulp.LpStatus[lp_problem.status]
@@ -393,7 +469,8 @@ layout = [
     [sg.Radio("Global Capacity", "CAP_TYPE", key="-GLOBAL-", default=True),
      sg.Radio("Per Item Capacity", "CAP_TYPE", key="-PERITEM-")],
     [sg.Frame("Custom Rules", [
-         [sg.Text("Rule Type:"), sg.Combo(["% of Volume Awarded", "# of transitions", "Supplier Exclusion"], key="-RULETYPE-", size=(30, 1), enable_events=True)],
+         [sg.Text("Rule Type:"), sg.Combo(["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion"],
+                                             key="-RULETYPE-", size=(30, 1), enable_events=True)],
          [sg.Text("Operator:"), sg.Combo(["At least", "At most", "Exactly"], key="-RULEOP-", size=(30, 1), default_value="At least")],
          [sg.Text("Rule Input:"), sg.Input(key="-RULEINPUT-", size=(10, 1))],
          [sg.Text("Grouping:"), sg.Combo(values=default_grouping_options, key="-GROUPING-", size=(30, 1), enable_events=True, default_value=default_grouping_options[0])],
@@ -410,17 +487,28 @@ window = sg.Window("Sourcing Optimization", layout)
 rules_list = []
 
 def update_grouping_scope(grouping, item_attr_data):
-    unique_vals = sorted({str(item_attr_data[j].get(grouping, "")).strip() for j in item_attr_data if str(item_attr_data[j].get(grouping, "")).strip() != ""})
-    return unique_vals
+    if grouping == "Bid ID":
+        return sorted(list(item_attr_data.keys()))
+    else:
+        unique_vals = sorted({str(item_attr_data[j].get(grouping, "")).strip() 
+                              for j in item_attr_data if str(item_attr_data[j].get(grouping, "")).strip() != ""})
+        return unique_vals
 
 def rule_to_text(rule):
     if rule["rule_type"] == "% of Volume Awarded":
         supplier_text = f"{rule['supplier_scope']}"
         grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
         return f"% Vol: {rule['operator']} {rule['rule_input']}% of {grouping_text} awarded to {supplier_text}"
+    elif rule["rule_type"] == "# of Volume Awarded":
+        supplier_text = f"{rule['supplier_scope']}"
+        grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
+        return f"# Vol: {rule['operator']} {rule['rule_input']} units of {grouping_text} awarded to {supplier_text}"
     elif rule["rule_type"] == "# of transitions":
         grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
         return f"# Transitions: {rule['operator']} {rule['rule_input']} transitions in {grouping_text}"
+    elif rule["rule_type"] == "# of suppliers":
+        grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
+        return f"# Suppliers: {rule['operator']} {rule['rule_input']} unique suppliers in {grouping_text}"
     elif rule["rule_type"] == "Supplier Exclusion":
         grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
         return f"Exclude {rule['supplier_scope']} from {grouping_text}"
@@ -432,7 +520,7 @@ while True:
     if event in (sg.WINDOW_CLOSED, "Exit"):
         break
     elif event == "-RULETYPE-":
-        # When rule type changes, update field enabling.
+        # Update field enabling based on rule type.
         if values["-RULETYPE-"] == "Supplier Exclusion":
             window["-RULEOP-"].update(value="", disabled=True)
             window["-RULEINPUT-"].update(value="", disabled=True)
@@ -440,9 +528,12 @@ while True:
         elif values["-RULETYPE-"] == "# of transitions":
             window["-RULEOP-"].update(disabled=False)
             window["-RULEINPUT-"].update(disabled=False)
-            # For transitions, supplier scope is not used.
             window["-SUPPSCOPE-"].update(value="", disabled=True)
-        elif values["-RULETYPE-"] == "% of Volume Awarded":
+        elif values["-RULETYPE-"] == "# of suppliers":
+            window["-RULEOP-"].update(disabled=False)
+            window["-RULEINPUT-"].update(disabled=False)
+            window["-SUPPSCOPE-"].update(value="", disabled=True)
+        elif values["-RULETYPE-"] in ["% of Volume Awarded", "# of Volume Awarded"]:
             window["-RULEOP-"].update(disabled=False)
             window["-RULEINPUT-"].update(disabled=False)
             window["-SUPPSCOPE-"].update(disabled=False)
@@ -456,9 +547,11 @@ while True:
             window["-GROUPSCOPE-"].update(values=scope_vals, value=scope_vals[0] if scope_vals else "")
     elif event == "-ADDRULE-":
         try:
-            if values["-RULETYPE-"] == "% of Volume Awarded":
+            if values["-RULETYPE-"] in ["% of Volume Awarded", "# of Volume Awarded"]:
                 rule_input = float(values["-RULEINPUT-"])
             elif values["-RULETYPE-"] == "# of transitions":
+                rule_input = int(values["-RULEINPUT-"])
+            elif values["-RULETYPE-"] == "# of suppliers":
                 rule_input = int(values["-RULEINPUT-"])
             else:
                 rule_input = None
