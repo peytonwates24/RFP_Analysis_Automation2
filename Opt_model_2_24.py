@@ -103,11 +103,24 @@ M = 1e9
 debug = True
 
 #############################################
+# UPDATE GROUPING SCOPE FUNCTION
+#############################################
+def update_grouping_scope(grouping, item_attr_data):
+    # This function returns unique values from the chosen grouping field
+    # and prepends the option "Apply to all items individually"
+    if grouping == "Bid ID":
+        vals = sorted(list(item_attr_data.keys()))
+    else:
+        vals = sorted({str(item_attr_data[j].get(grouping, "")).strip() 
+                       for j in item_attr_data if str(item_attr_data[j].get(grouping, "")).strip() != ""})
+    return ["Apply to all items individually"] + vals
+
+#############################################
 # OPTIMIZATION MODEL FUNCTION
 #############################################
 def run_optimization(use_global, capacity_data, demand_data, item_attr_data, price_data,
                      rebate_tiers, discount_tiers, baseline_price_data, rules=[]):
-    global debug  # Ensure we use the global debug flag
+    global debug
     items_dynamic = list(demand_data.keys())
     # Create transition variables for non-incumbent suppliers.
     T = {}
@@ -121,7 +134,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
 
     lp_problem = pulp.LpProblem("Sourcing_with_MultiTier_Rebates_Discounts", pulp.LpMinimize)
 
-    # Decision variables: x[s,j] = awarded volume from supplier s for bid j.
+    # Decision variables.
     x = {(s, j): pulp.LpVariable(f"x_{s}_{j}", lowBound=0, cat='Continuous')
          for s in suppliers for j in items_dynamic}
     S0 = {s: pulp.LpVariable(f"S0_{s}", lowBound=0, cat='Continuous') for s in suppliers}
@@ -150,14 +163,11 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     d = {s: pulp.LpVariable(f"d_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     rebate_var = {s: pulp.LpVariable(f"rebate_{s}", lowBound=0, cat='Continuous') for s in suppliers}
 
-    # Objective: Minimize total effective cost.
     lp_problem += pulp.lpSum(S[s] - rebate_var[s] for s in suppliers), "Total_Effective_Cost"
 
-    # Demand constraints.
     for j in items_dynamic:
         lp_problem += pulp.lpSum(x[(s, j)] for s in suppliers) == demand_data[j], f"Demand_{j}"
 
-    # Capacity constraints.
     if use_global:
         supplier_capacity_groups = {}
         all_groups = {item_attr_data[j].get("Capacity Group") for j in items_dynamic if item_attr_data[j].get("Capacity Group") is not None}
@@ -177,12 +187,10 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 cap = capacity_data.get((s, j), 1e9)
                 lp_problem += x[(s, j)] <= cap, f"PerItemCapacity_{s}_{j}"
 
-    # Base spend and volume constraints.
     for s in suppliers:
         lp_problem += S0[s] == pulp.lpSum(price_data[(s, j)] * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
         lp_problem += V[s] == pulp.lpSum(x[(s, j)] for j in items_dynamic), f"Volume_{s}"
 
-    # Discount tier constraints.
     for s in suppliers:
         tiers = discount_tiers.get(s, default_discount_tiers[s])
         M_discount = U_spend[s]
@@ -198,11 +206,9 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
             lp_problem += d[s] >= Dperc * S0[s] - M_discount*(1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
             lp_problem += d[s] <= Dperc * S0[s] + M_discount*(1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
 
-    # Effective spend constraints.
     for s in suppliers:
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
 
-    # Rebate tier constraints.
     for s in suppliers:
         tiers = rebate_tiers.get(s, default_rebate_tiers[s])
         M_rebate = U_spend[s]
@@ -218,7 +224,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
             lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate*(1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
             lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate*(1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
 
-    # Pre-compute lowest and second lowest cost suppliers for each bid.
     lowest_cost_supplier = {}
     second_lowest_cost_supplier = {}
     for j in items_dynamic:
@@ -234,12 +239,16 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     ###########################################
     # CUSTOM RULES (from GUI input)
     ###########################################
-    # Process each rule from the GUI.
     for r_idx, rule in enumerate(rules):
         if rule["rule_type"] == "# of suppliers":
-            # If grouping is "Bid ID" with rule input 1, enforce per bid using binary indicators.
+            # If grouping is "Bid ID" and rule input is 1:
             if rule["grouping"] == "Bid ID" and rule["operator"] == "Exactly" and rule["rule_input"] == "1":
-                for j in [rule["grouping_scope"]]:
+                # Expand rule if user selects "Apply to all items individually"
+                if rule["grouping_scope"] == "Apply to all items individually":
+                    bids = sorted(list(item_attr_data.keys()))
+                else:
+                    bids = [rule["grouping_scope"]]
+                for j in bids:
                     w = {}
                     for s in suppliers:
                         w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{j}_{s}", cat='Binary')
@@ -249,9 +258,14 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                     if debug:
                         print(f"DEBUG: Enforcing exactly one supplier for Bid {j} via rule {r_idx}")
             else:
-                # Aggregated handling (if needed).
-                if rule["grouping"] == "All":
+                if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
                     items_group = items_dynamic
+                elif rule["grouping_scope"] == "Apply to all items individually":
+                    if rule["grouping"] == "Bid ID":
+                        items_group = sorted(list(item_attr_data.keys()))
+                    else:
+                        items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() 
+                                               for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 else:
                     items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
                 try:
@@ -272,8 +286,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 elif operator == "Exactly":
                     lp_problem += total_suppliers == supplier_target, f"Rule_{r_idx}"
         elif rule["rule_type"] == "% of Volume Awarded":
-            # For supplier scope "New Suppliers" and grouping "All", apply an aggregated constraint.
-            if rule["supplier_scope"] == "New Suppliers":
+            if rule["supplier_scope"] == "New Suppliers" and rule["grouping"] == "All":
                 try:
                     percentage = float(rule["rule_input"]) / 100.0
                 except:
@@ -286,8 +299,14 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 if debug:
                     print(f"DEBUG: Enforcing aggregate new suppliers volume <= {percentage * sum(demand_data[j] for j in items_dynamic):.2f}")
             else:
-                if rule["grouping"] == "All":
+                if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
                     items_group = items_dynamic
+                elif rule["grouping_scope"] == "Apply to all items individually":
+                    if rule["grouping"] == "Bid ID":
+                        items_group = sorted(list(item_attr_data.keys()))
+                    else:
+                        items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                                               for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 else:
                     items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
                 try:
@@ -311,7 +330,33 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                     lp_problem += lhs <= percentage * total_vol, f"Rule_{r_idx}"
                 elif operator == "Exactly":
                     lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
-        # Other rule types can be added similarly.
+        elif rule["rule_type"] == "# of transitions":
+            # NEW: Process transitions rule.
+            if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
+                items_group = items_dynamic
+            elif rule["grouping_scope"] == "Apply to all items individually":
+                if rule["grouping"] == "Bid ID":
+                    items_group = sorted(list(item_attr_data.keys()))
+                else:
+                    items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                                           for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            try:
+                transitions_target = int(rule["rule_input"])
+            except:
+                continue
+            operator = rule["operator"]
+            total_transitions = pulp.lpSum(T[(j, s)] for (j, s) in T if j in items_group)
+            if operator == "At least":
+                lp_problem += total_transitions >= transitions_target, f"Rule_{r_idx}"
+            elif operator == "At most":
+                lp_problem += total_transitions <= transitions_target, f"Rule_{r_idx}"
+            elif operator == "Exactly":
+                lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
+            if debug:
+                print(f"DEBUG: Enforcing total transitions {operator} {transitions_target} over items {items_group}")
+        # Additional rule types can be added similarly.
     
     if debug:
         constraint_names = list(lp_problem.constraints.keys())
@@ -342,7 +387,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     else:
         feasibility_notes = "Model is optimal."
     
-    # Build results for Excel output.
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     for idx, j in enumerate(items_dynamic, start=1):
@@ -418,7 +462,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
 
     df_feasibility = pd.DataFrame({"Feasibility Notes": [feasibility_notes]})
     
-    # Write the LP model to a temporary file and include its text in an "LP Model" sheet.
     home_dir = os.path.expanduser("~")
     downloads_folder = os.path.join(home_dir, "Downloads")
     temp_lp_file = os.path.join(downloads_folder, "temp_model.lp")
@@ -451,7 +494,7 @@ layout = [
          [sg.Text("Operator:"), sg.Combo(["At least", "At most", "Exactly"], key="-RULEOP-", size=(30, 1), default_value="At least")],
          [sg.Text("Rule Input:"), sg.Input(key="-RULEINPUT-", size=(10, 1))],
          [sg.Text("Grouping:"), sg.Combo(values=default_grouping_options, key="-GROUPING-", size=(30, 1), enable_events=True, default_value=default_grouping_options[0])],
-         [sg.Text("Grouping Scope:"), sg.Combo(values=[], key="-GROUPSCOPE-", size=(30, 1))],
+         [sg.Text("Apply to all items individually:"), sg.Combo(values=[], key="-GROUPSCOPE-", size=(30, 1))],
          [sg.Text("Supplier Scope:"), sg.Combo(values=default_supplier_scope_options, key="-SUPPSCOPE-", size=(30, 1))],
          [sg.Button("Add Rule", key="-ADDRULE-"), sg.Button("Clear Rules", key="-CLEARRULES-")],
          [sg.Multiline("", size=(60, 5), key="-RULELIST-")]
@@ -464,12 +507,7 @@ window = sg.Window("Sourcing Optimization", layout)
 rules_list = []
 
 def update_grouping_scope(grouping, item_attr_data):
-    if grouping == "Bid ID":
-        return sorted(list(item_attr_data.keys()))
-    else:
-        unique_vals = sorted({str(item_attr_data[j].get(grouping, "")).strip() 
-                              for j in item_attr_data if str(item_attr_data[j].get(grouping, "")).strip() != ""})
-        return unique_vals
+    return update_grouping_scope(grouping, item_attr_data)  # already defined above
 
 def rule_to_text(rule):
     if rule["rule_type"] == "% of Volume Awarded":
