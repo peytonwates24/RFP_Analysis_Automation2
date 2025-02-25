@@ -241,9 +241,8 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     ###########################################
     for r_idx, rule in enumerate(rules):
         if rule["rule_type"] == "# of suppliers":
-            # If grouping is "Bid ID" and rule input is 1:
             if rule["grouping"] == "Bid ID" and rule["operator"] == "Exactly" and rule["rule_input"] == "1":
-                # Expand rule if user selects "Apply to all items individually"
+                # Expand rule if user selected "Apply to all items individually"
                 if rule["grouping_scope"] == "Apply to all items individually":
                     bids = sorted(list(item_attr_data.keys()))
                 else:
@@ -264,7 +263,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                     if rule["grouping"] == "Bid ID":
                         items_group = sorted(list(item_attr_data.keys()))
                     else:
-                        items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() 
+                        items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
                                                for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 else:
                     items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
@@ -331,7 +330,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 elif operator == "Exactly":
                     lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
         elif rule["rule_type"] == "# of transitions":
-            # NEW: Process transitions rule.
+            # Process transitions rule.
             if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
                 items_group = items_dynamic
             elif rule["grouping_scope"] == "Apply to all items individually":
@@ -356,7 +355,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
             if debug:
                 print(f"DEBUG: Enforcing total transitions {operator} {transitions_target} over items {items_group}")
-        # Additional rule types can be added similarly.
+        # Additional rule types could be added similarly.
     
     if debug:
         constraint_names = list(lp_problem.constraints.keys())
@@ -505,9 +504,6 @@ layout = [
 
 window = sg.Window("Sourcing Optimization", layout)
 rules_list = []
-
-def update_grouping_scope(grouping, item_attr_data):
-    return update_grouping_scope(grouping, item_attr_data)  # already defined above
 
 def rule_to_text(rule):
     if rule["rule_type"] == "% of Volume Awarded":
