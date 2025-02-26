@@ -5,11 +5,12 @@ import PySimpleGUI as sg
 import pulp
 
 #############################################
-# DEFAULT DATA (used exclusively now)
+# DEFAULT DATA
 #############################################
 
 suppliers = ['A', 'B', 'C']
 
+# Item Attributes (keyed by Bid ID)
 default_item_attributes = {
     '1': {'BusinessUnit': 'A', 'Incumbent': 'A', 'Capacity Group': 'Widgets', 'Facility': 'Facility1'},
     '2': {'BusinessUnit': 'B', 'Incumbent': 'B', 'Capacity Group': 'Gadgets', 'Facility': 'Facility1'},
@@ -25,15 +26,15 @@ default_item_attributes = {
 
 default_price = {
     ('A', '1'): 50,  ('A', '2'): 70,  ('A', '3'): 55,
-    ('B', '1'): 60,  ('B', '2'): 80,  ('B', '3'): 65,
+    ('B', '1'): 6,  ('B', '2'): 80,  ('B', '3'): 65,
     ('C', '1'): 55,  ('C', '2'): 75,  ('C', '3'): 60,
     ('A', '4'): 23,  ('A', '5'): 54,  ('A', '6'): 42,
     ('B', '4'): 75,  ('B', '5'): 34,  ('B', '6'): 24,
-    ('C', '4'): 24,  ('C', '5'): 24,  ('C', '6'): 64,
+    ('C', '4'): 24,  ('C', '5'): 2,  ('C', '6'): 64,
     ('A', '7'): 232, ('A', '8'): 75,  ('A', '9'): 97,
     ('B', '7'): 53,  ('B', '8'): 13,  ('B', '9'): 56,
     ('C', '7'): 86,  ('C', '8'): 24,  ('C', '9'): 134,
-    ('A', '10'): 64, ('B', '10'): 13, ('C', '10'): 75
+    ('A', '10'): 64, ('B', '10'): 1300, ('C', '10'): 7500
 }
 
 default_demand = {
@@ -103,11 +104,48 @@ M = 1e9
 debug = True
 
 #############################################
-# UPDATE GROUPING SCOPE FUNCTION
+# NEW: SUPPLIER BID ATTRIBUTES (keyed by (supplier, bid))
+#############################################
+default_supplier_bid_attributes = {
+    ('A', '1'): {"Milage": 400, "Origin Country": "Mexico"},
+    ('A', '2'): {"Milage": 420, "Origin Country": "USA"},
+    ('A', '3'): {"Milage": 410, "Origin Country": "USA"},
+    ('A', '4'): {"Milage": 430, "Origin Country": "USA"},
+    ('A', '5'): {"Milage": 450, "Origin Country": "Canada"},
+    ('A', '6'): {"Milage": 460, "Origin Country": "USA"},
+    ('A', '7'): {"Milage": 470, "Origin Country": "Canada"},
+    ('A', '8'): {"Milage": 480, "Origin Country": "USA"},
+    ('A', '9'): {"Milage": 490, "Origin Country": "USA"},
+    ('A', '10'): {"Milage": 500, "Origin Country": "Mexico"},
+
+    ('B', '1'): {"Milage": 499, "Origin Country": "Canada"},
+    ('B', '2'): {"Milage": 610, "Origin Country": "Canada"},
+    ('B', '3'): {"Milage": 620, "Origin Country": "Canada"},
+    ('B', '4'): {"Milage": 630, "Origin Country": "Mexico"},
+    ('B', '5'): {"Milage": 640, "Origin Country": "Canada"},
+    ('B', '6'): {"Milage": 650, "Origin Country": "Canada"},
+    ('B', '7'): {"Milage": 660, "Origin Country": "Canada"},
+    ('B', '8'): {"Milage": 670, "Origin Country": "Mexico"},
+    ('B', '9'): {"Milage": 680, "Origin Country": "Canada"},
+    ('B', '10'): {"Milage": 690, "Origin Country": "Canada"},
+
+    ('C', '1'): {"Milage": 500, "Origin Country": "USA"},
+    ('C', '2'): {"Milage": 510, "Origin Country": "USA"},
+    ('C', '3'): {"Milage": 520, "Origin Country": "USA"},
+    ('C', '4'): {"Milage": 530, "Origin Country": "USA"},
+    ('C', '5'): {"Milage": 540, "Origin Country": "Mexico"},
+    ('C', '6'): {"Milage": 550, "Origin Country": "USA"},
+    ('C', '7'): {"Milage": 560, "Origin Country": "USA"},
+    ('C', '8'): {"Milage": 570, "Origin Country": "Mexico"},
+    ('C', '9'): {"Milage": 580, "Origin Country": "Mexico"},
+    ('C', '10'): {"Milage": 590, "Origin Country": "USA"}
+}
+default_bid_grouping_options = ["Milage", "Origin Country"]
+
+#############################################
+# UPDATE GROUPING SCOPE FUNCTION (for item attributes)
 #############################################
 def update_grouping_scope(grouping, item_attr_data):
-    # This function returns unique values from the chosen grouping field
-    # and prepends the option "Apply to all items individually"
     if grouping == "Bid ID":
         vals = sorted(list(item_attr_data.keys()))
     else:
@@ -236,13 +274,12 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
             lowest_cost_supplier[j] = prices[0][1]
             second_lowest_cost_supplier[j] = prices[1][1] if len(prices) > 1 else prices[0][1]
 
-    ###########################################
-    # CUSTOM RULES (from GUI input)
-    ###########################################
+    #############################################
+    # CUSTOM RULES PROCESSING
+    #############################################
     for r_idx, rule in enumerate(rules):
         if rule["rule_type"] == "# of suppliers":
             if rule["grouping"] == "Bid ID" and rule["operator"] == "Exactly" and rule["rule_input"] == "1":
-                # Expand rule if user selected "Apply to all items individually"
                 if rule["grouping_scope"] == "Apply to all items individually":
                     bids = sorted(list(item_attr_data.keys()))
                 else:
@@ -330,7 +367,6 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 elif operator == "Exactly":
                     lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
         elif rule["rule_type"] == "# of transitions":
-            # Process transitions rule.
             if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
                 items_group = items_dynamic
             elif rule["grouping_scope"] == "Apply to all items individually":
@@ -355,8 +391,54 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
             if debug:
                 print(f"DEBUG: Enforcing total transitions {operator} {transitions_target} over items {items_group}")
-        # Additional rule types could be added similarly.
-    
+        elif rule["rule_type"] == "Bid Exclusions":
+            # Process Bid Exclusions rule.
+            if rule["grouping"] == "All" or rule["grouping_scope"] in ["All", "Apply to all items individually"]:
+                items_group = items_dynamic
+            else:
+                items_group = [j for j in items_dynamic if str(default_item_attributes[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            bid_group = rule.get("bid_grouping", None)
+            if bid_group is None:
+                continue
+            # Determine if the bid attribute is numeric using the first available value.
+            is_numeric = True
+            for j in items_group:
+                for s in suppliers:
+                    val = default_supplier_bid_attributes.get((s, j), {}).get(bid_group, None)
+                    if val is not None:
+                        try:
+                            float(val)
+                        except:
+                            is_numeric = False
+                        break
+                break
+            # For each bid and each supplier, check the bid attribute value.
+            for j in items_group:
+                for s in suppliers:
+                    bid_val = default_supplier_bid_attributes.get((s, j), {}).get(bid_group, None)
+                    if bid_val is None:
+                        continue
+                    exclude = False
+                    if is_numeric:
+                        try:
+                            bid_val_num = float(bid_val)
+                            threshold = float(rule["rule_input"])
+                        except:
+                            continue
+                        op = rule["operator"]
+                        if op == "At most" and bid_val_num > threshold:
+                            exclude = True
+                        elif op == "At least" and bid_val_num < threshold:
+                            exclude = True
+                        elif op == "Exactly" and bid_val_num != threshold:
+                            exclude = True
+                    else:
+                        if bid_val.strip() == rule.get("bid_exclusion_value", "").strip():
+                            exclude = True
+                    if exclude:
+                        lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
+                        if debug:
+                            print(f"DEBUG: Excluding Bid {j} for supplier {s} due to Bid Exclusions rule {r_idx} on {bid_group} with value {bid_val}")
     if debug:
         constraint_names = list(lp_problem.constraints.keys())
         duplicates = set([n for n in constraint_names if constraint_names.count(n) > 1])
@@ -376,7 +458,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
         feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n"
         for j in items_dynamic:
             if use_global:
-                group = item_attr_data[j].get("Capacity Group", "Unknown")
+                group = default_item_attributes[j].get("Capacity Group", "Unknown")
                 total_cap = sum(capacity_data.get((s, group), 0) for s in suppliers)
                 feasibility_notes += f"  Bid {j}: demand = {demand_data[j]}, capacity for group {group} = {total_cap}\n"
             else:
@@ -414,7 +496,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
             baseline_spend = base_price * award_val
             baseline_savings = baseline_spend - awarded_spend
             if use_global:
-                group = item_attr_data[j].get("Capacity Group", "Unknown")
+                group = default_item_attributes[j].get("Capacity Group", "Unknown")
                 awarded_capacity = capacity_data.get((s, group), 0)
             else:
                 awarded_capacity = capacity_data.get((s, j), 0)
@@ -424,13 +506,13 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                     active_rebate = tier[2]
                     break
             rebate_savings = awarded_spend * active_rebate
-            facility_val = item_attr_data[j].get("Facility", "")
+            facility_val = default_item_attributes[j].get("Facility", "")
             row = {
                 "Bid ID": idx,
-                "Capacity Group": item_attr_data[j].get("Capacity Group", "") if use_global else "",
+                "Capacity Group": default_item_attributes[j].get("Capacity Group", "") if use_global else "",
                 "Bid ID Split": bid_split,
                 "Facility": facility_val,
-                "Incumbent": item_attr_data[j].get("Incumbent", ""),
+                "Incumbent": default_item_attributes[j].get("Incumbent", ""),
                 "Baseline Price": base_price,
                 "Baseline Spend": baseline_spend,
                 "Awarded Supplier": s,
@@ -488,13 +570,16 @@ layout = [
     [sg.Radio("Global Capacity", "CAP_TYPE", key="-GLOBAL-", default=True),
      sg.Radio("Per Item Capacity", "CAP_TYPE", key="-PERITEM-")],
     [sg.Frame("Custom Rules", [
-         [sg.Text("Rule Type:"), sg.Combo(["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion"],
+         [sg.Text("Rule Type:"), sg.Combo(["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion", "Bid Exclusions"],
                                              key="-RULETYPE-", size=(30, 1), enable_events=True)],
          [sg.Text("Operator:"), sg.Combo(["At least", "At most", "Exactly"], key="-RULEOP-", size=(30, 1), default_value="At least")],
          [sg.Text("Rule Input:"), sg.Input(key="-RULEINPUT-", size=(10, 1))],
          [sg.Text("Grouping:"), sg.Combo(values=default_grouping_options, key="-GROUPING-", size=(30, 1), enable_events=True, default_value=default_grouping_options[0])],
          [sg.Text("Apply to all items individually:"), sg.Combo(values=[], key="-GROUPSCOPE-", size=(30, 1))],
          [sg.Text("Supplier Scope:"), sg.Combo(values=default_supplier_scope_options, key="-SUPPSCOPE-", size=(30, 1))],
+         # New fields for Bid Exclusions:
+         [sg.Text("Bid Grouping:"), sg.Combo(values=default_bid_grouping_options, key="-BIDGROUPING-", size=(30, 1), enable_events=True, visible=False)],
+         [sg.Text("Bid Exclusion Value:"), sg.Combo(values=[], key="-BIDEXCLUSIONVALUE-", size=(30, 1), visible=False)],
          [sg.Button("Add Rule", key="-ADDRULE-"), sg.Button("Clear Rules", key="-CLEARRULES-")],
          [sg.Multiline("", size=(60, 5), key="-RULELIST-")]
     ])],
@@ -523,6 +608,11 @@ def rule_to_text(rule):
     elif rule["rule_type"] == "Supplier Exclusion":
         grouping_text = "all items" if rule["grouping"] == "All" else rule["grouping_scope"]
         return f"Exclude {rule['supplier_scope']} from {grouping_text}"
+    elif rule["rule_type"] == "Bid Exclusions":
+        if rule["bid_grouping"] in ["Milage"]:
+            return f"Bid Exclusions on {rule['bid_grouping']}: {rule['operator']} {rule['rule_input']}"
+        else:
+            return f"Bid Exclusions on {rule['bid_grouping']}: exclude '{rule['bid_exclusion_value']}'"
     else:
         return str(rule)
 
@@ -535,18 +625,32 @@ while True:
             window["-RULEOP-"].update(value="", disabled=True)
             window["-RULEINPUT-"].update(value="", disabled=True)
             window["-SUPPSCOPE-"].update(disabled=False)
+            window["-BIDGROUPING-"].update(visible=False)
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
         elif values["-RULETYPE-"] == "# of transitions":
             window["-RULEOP-"].update(disabled=False)
             window["-RULEINPUT-"].update(disabled=False)
             window["-SUPPSCOPE-"].update(value="", disabled=True)
+            window["-BIDGROUPING-"].update(visible=False)
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
         elif values["-RULETYPE-"] == "# of suppliers":
             window["-RULEOP-"].update(disabled=False)
             window["-RULEINPUT-"].update(disabled=False)
             window["-SUPPSCOPE-"].update(value="", disabled=True)
+            window["-BIDGROUPING-"].update(visible=False)
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
         elif values["-RULETYPE-"] in ["% of Volume Awarded", "# of Volume Awarded"]:
             window["-RULEOP-"].update(disabled=False)
             window["-RULEINPUT-"].update(disabled=False)
-            window["-SUPPSCOPE-"].update(disabled=False)
+            window["-SUPPSCOPE-"].update(visible=True, disabled=False)
+            window["-BIDGROUPING-"].update(visible=False)
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
+        elif values["-RULETYPE-"] == "Bid Exclusions":
+            window["-SUPPSCOPE-"].update(value="", disabled=True)
+            window["-BIDGROUPING-"].update(visible=True)
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
+            window["-RULEOP-"].update(visible=True, disabled=False)
+            window["-RULEINPUT-"].update(visible=True, disabled=False)
     elif event == "-GROUPING-":
         grouping = values["-GROUPING-"]
         if grouping == "All":
@@ -555,6 +659,20 @@ while True:
             window["-GROUPSCOPE-"].update(disabled=False)
             scope_vals = update_grouping_scope(grouping, default_item_attributes)
             window["-GROUPSCOPE-"].update(values=scope_vals, value=scope_vals[0] if scope_vals else "")
+    elif event == "-BIDGROUPING-":
+        bid_group = values["-BIDGROUPING-"]
+        if bid_group == "Milage":
+            window["-BIDEXCLUSIONVALUE-"].update(visible=False)
+            window["-RULEOP-"].update(visible=True, disabled=False)
+            window["-RULEINPUT-"].update(visible=True, disabled=False)
+        else:
+            window["-RULEOP-"].update(value="", visible=False, disabled=True)
+            window["-RULEINPUT-"].update(value="", visible=False, disabled=True)
+            # Collect unique bid attribute values over all supplier-bid pairs
+            unique_vals = sorted({str(val.get(bid_group, "")).strip() for key, val in default_supplier_bid_attributes.items()})
+            window["-BIDEXCLUSIONVALUE-"].update(values=unique_vals, visible=True)
+            if unique_vals:
+                window["-BIDEXCLUSIONVALUE-"].update(value=unique_vals[0])
     elif event == "-ADDRULE-":
         try:
             if values["-RULETYPE-"] in ["% of Volume Awarded", "# of Volume Awarded"]:
@@ -574,8 +692,11 @@ while True:
             "grouping_scope": values["-GROUPSCOPE-"],
             "supplier_scope": values["-SUPPSCOPE-"]
         }
+        if values["-RULETYPE-"] == "Bid Exclusions":
+            rule["bid_grouping"] = values["-BIDGROUPING-"]
+            rule["bid_exclusion_value"] = values["-BIDEXCLUSIONVALUE-"]
         rules_list.append(rule)
-        window["-RULELIST-"].update("\n".join([rule_to_text(r) for r in rules_list]))
+        window["-RULELIST-"].update("\n".join([f"{i+1}. " + rule_to_text(r) for i, r in enumerate(rules_list)]))
     elif event == "-CLEARRULES-":
         rules_list = []
         window["-RULELIST-"].update("")
