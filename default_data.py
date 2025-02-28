@@ -29,7 +29,7 @@ if uploaded_file is not None:
     # Load the workbook
     workbook = load_workbook(filename=uploaded_file, data_only=True)
     sheet_names = workbook.sheetnames
-    st.write("Worksheets found:", sheet_names)
+ #   st.write("Worksheets found:", sheet_names)
     
     # Use three columns per row for side-by-side display
     num_cols = 3
