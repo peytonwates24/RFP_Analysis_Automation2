@@ -4,7 +4,7 @@ from openpyxl import load_workbook
 
 # Expand the working space to full width
 st.set_page_config(layout="wide")
-st.title("Excel File Uploader with Condensed Visualization, Validation, and Global Data Extraction")
+st.title("Scenario Builder")
 
 # Upload the Excel file
 uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
@@ -70,22 +70,22 @@ if uploaded_file is not None:
                                     st.warning("Missing both 'BusinessUnit' and 'Facility'. One of these is recommended.")
 
 # Global Data Extraction in a thinner sidebar panel
-st.sidebar.markdown("## Global Data Extraction")
-if sheet_dfs:
-    selected_sheet = st.sidebar.selectbox("Select a sheet", options=list(sheet_dfs.keys()))
-    df_selected = sheet_dfs[selected_sheet]
-    selected_column = st.sidebar.selectbox("Select column", options=df_selected.columns.tolist(), key="global_col")
+# st.sidebar.markdown("## Global Data Extraction")
+# if sheet_dfs:
+#     selected_sheet = st.sidebar.selectbox("Select a sheet", options=list(sheet_dfs.keys()))
+#     df_selected = sheet_dfs[selected_sheet]
+#     selected_column = st.sidebar.selectbox("Select column", options=df_selected.columns.tolist(), key="global_col")
     
-    # Get unique values for filtering (with an option to show all data)
-    unique_values = df_selected[selected_column].dropna().unique().tolist()
-    unique_values = ["<Show All>"] + unique_values
-    selected_value = st.sidebar.selectbox(f"Select value from '{selected_column}'", options=unique_values, key="global_val")
+#     # Get unique values for filtering (with an option to show all data)
+#     unique_values = df_selected[selected_column].dropna().unique().tolist()
+#     unique_values = ["<Show All>"] + unique_values
+#     selected_value = st.sidebar.selectbox(f"Select value from '{selected_column}'", options=unique_values, key="global_val")
     
-    if selected_value == "<Show All>":
-        result_df = df_selected
-    else:
-        result_df = df_selected[df_selected[selected_column] == selected_value]
+#     if selected_value == "<Show All>":
+#         result_df = df_selected
+#     else:
+#         result_df = df_selected[df_selected[selected_column] == selected_value]
     
-    st.sidebar.write(f"Extracted Data from '{selected_sheet}' where {selected_column} = {selected_value}:")
-    st.sidebar.dataframe(result_df)
+#     st.sidebar.write(f"Extracted Data from '{selected_sheet}' where {selected_column} = {selected_value}:")
+#     st.sidebar.dataframe(result_df)
 
