@@ -19,6 +19,10 @@ from pptx import Presentation
 from supabase import create_client, Client  # New import
 import logging
 import uuid 
+import modules.optimization 
+from modules.optimization import load_excel_sheets, validate_sheet, df_to_dict_item_attributes, df_to_dict_price, df_to_dict_demand, df_to_dict_baseline_price, df_to_dict_per_item_capacity, df_to_dict_global_capacity, df_to_dict_tiers, df_to_dict_supplier_bid_attributes, rule_to_text, run_optimization
+
+
 
 # testxd
 # # Configure logging
@@ -162,6 +166,8 @@ def main():
         navigate_to('home')
     if st.sidebar.button('Start a New Analysis'):
         navigate_to('upload')
+    if st.sidebar.button('Optimization Mode'):
+        navigate_to('optimization')
     if st.sidebar.button('My Projects'):
         navigate_to('analysis')
     if st.sidebar.button('Upload Database'):
@@ -285,6 +291,150 @@ def main():
                                 st.session_state.selected_subfolder = subfolder
             else:
                 st.info("No projects found. Start by creating a new project.")
+
+    elif section == 'optimization':
+        st.title("Scenario Builder & Optimization")
+
+        uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
+
+        if uploaded_file is not None:
+            st.markdown("### Uploaded Worksheets")
+            sheet_dfs = load_excel_sheets(uploaded_file)
+            for sheet_name, df in sheet_dfs.items():
+                missing = validate_sheet(df, sheet_name)
+                if missing:
+                    st.error(f"Missing required columns in '{sheet_name}': {', '.join(missing)}")
+            
+            # Capacity Input Type
+            capacity_mode = st.radio("Select Capacity Input Type:", ("Global Capacity", "Per Item Capacity"))
+            use_global = (capacity_mode == "Global Capacity")
+            
+            # --- Custom Rules Section ---
+            st.markdown("### Custom Rules")
+            col_rt, col_op = st.columns(2)
+            with col_rt:
+                rule_type = st.selectbox("Rule Type", options=["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion", "Bid Exclusions"])
+            with col_op:
+                operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"])
+            rule_input = st.text_input("Rule Input")
+            
+            if "Item Attributes" in sheet_dfs:
+                temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                sample_keys = list(next(iter(temp_item_attr.values())).keys())
+                grouping_options = ["All", "Bid ID"] + sample_keys
+            else:
+                grouping_options = ["All", "Bid ID"]
+            col_group, col_group_scope = st.columns(2)
+            with col_group:
+                grouping = st.selectbox("Grouping", options=grouping_options)
+            with col_group_scope:
+                def update_grouping_scope(grouping, item_attr_data):
+                    if grouping == "Bid ID":
+                        vals = sorted(list(item_attr_data.keys()))
+                    else:
+                        vals = sorted({str(item_attr_data[bid].get(grouping, "")).strip() 
+                                    for bid in item_attr_data if str(item_attr_data[bid].get(grouping, "")).strip() != ""})
+                    return ["Apply to all items individually"] + vals
+                if grouping != "All":
+                    grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr))
+                else:
+                    grouping_scope = "All"
+            
+            # Auto-populate Supplier Scope from uploaded data
+            suppliers_auto = st.session_state.get("suppliers", [])
+            if suppliers_auto:
+                supplier_scope = st.selectbox("Supplier Scope", options=["All"] + suppliers_auto)
+                if supplier_scope == "All":
+                    supplier_scope = None
+            else:
+                supplier_scope = st.text_input("Supplier Scope (or leave blank)", value="")
+            
+            bid_grouping = None
+            bid_exclusion_value = None
+            if rule_type == "Bid Exclusions":
+                bid_grouping = st.selectbox("Bid Grouping", options=["Milage", "Origin Country"])
+                if bid_grouping != "Milage":
+                    bid_exclusion_value = st.text_input("Bid Exclusion Value", value="")
+            
+            col_add, col_clear = st.columns(2)
+            with col_add:
+                if st.button("Add Rule"):
+                    rule = {
+                        "rule_type": rule_type,
+                        "operator": operator,
+                        "rule_input": rule_input,
+                        "grouping": grouping,
+                        "grouping_scope": grouping_scope,
+                        "supplier_scope": supplier_scope
+                    }
+                    if rule_type == "Bid Exclusions":
+                        rule["bid_grouping"] = bid_grouping
+                        rule["bid_exclusion_value"] = bid_exclusion_value
+                    if "rules_list" not in st.session_state:
+                        st.session_state.rules_list = []
+                    st.session_state.rules_list.append(rule)
+                    st.success("Rule added.")
+            with col_clear:
+                if st.button("Clear Rules"):
+                    st.session_state.rules_list = []
+                    st.success("All rules cleared.")
+            
+            if "rules_list" in st.session_state and st.session_state.rules_list:
+                st.markdown("#### Current Rules")
+                for i, r in enumerate(st.session_state.rules_list):
+                    col_rule, col_del = st.columns([0.95, 0.05])
+                    with col_rule:
+                        st.write(f"{i+1}. {rule_to_text(r)}")
+                    with col_del:
+                        if st.button("X", key=f"delete_rule_{i}"):
+                            st.session_state.rules_list.pop(i)
+            
+            # --- End Custom Rules Section ---
+            
+            required_sheet_names = ["Item Attributes", "Price", "Demand", "Rebate Tiers", "Discount Tiers",
+                                    "Baseline Price", "Per Item Capacity", "Global Capacity", "Supplier Bid Attributes"]
+            if all(sheet in sheet_dfs for sheet in required_sheet_names):
+                try:
+                    item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                    price_dict = df_to_dict_price(sheet_dfs["Price"])
+                    demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
+                    baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
+                    per_item_capacity_dict = df_to_dict_per_item_capacity(sheet_dfs["Per Item Capacity"])
+                    global_capacity_dict = df_to_dict_global_capacity(sheet_dfs["Global Capacity"])
+                    rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
+                    discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
+                    supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                    
+                    suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                    st.session_state.suppliers = suppliers
+                    st.success("Data extraction complete. Ready to run optimization.")
+                    
+                    if st.button("Run Optimization"):
+                        with st.spinner("Running optimization..."):
+                            output_file, feasibility_notes, model_status = run_optimization(
+                                use_global,
+                                global_capacity_dict if use_global else per_item_capacity_dict,
+                                demand_dict,
+                                item_attr_dict,
+                                price_dict,
+                                rebate_tiers_dict,
+                                discount_tiers_dict,
+                                baseline_price_dict,
+                                per_item_capacity_dict,
+                                supplier_bid_attr_dict,
+                                suppliers,
+                                rules=st.session_state.rules_list
+                            )
+                        st.success(f"Model Status: {model_status}")
+                        st.markdown("#### Feasibility Notes")
+                        st.text(feasibility_notes)
+                        st.markdown("#### Optimization Results")
+                        df_results = pd.read_excel(output_file, sheet_name="Results")
+                        st.dataframe(df_results)
+                        with open(output_file, "rb") as f:
+                            st.download_button("Download Results", f, file_name="optimization_results.xlsx")
+                except Exception as e:
+                    st.error(f"Error preparing data for optimization: {e}")
 
     elif section == 'upload':
         st.title('Start a New Analysis')
