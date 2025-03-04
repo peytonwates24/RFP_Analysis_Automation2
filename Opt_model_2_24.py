@@ -142,6 +142,8 @@ default_supplier_bid_attributes = {
 }
 default_bid_grouping_options = ["Milage", "Origin Country"]
 
+
+
 #############################################
 # UPDATE GROUPING SCOPE FUNCTION (for item attributes)
 #############################################
@@ -156,6 +158,13 @@ def update_grouping_scope(grouping, item_attr_data):
 #############################################
 # OPTIMIZATION MODEL FUNCTION
 #############################################
+
+
+
+
+
+
+
 def run_optimization(use_global, capacity_data, demand_data, item_attr_data, price_data,
                      rebate_tiers, discount_tiers, baseline_price_data, rules=[]):
     global debug
