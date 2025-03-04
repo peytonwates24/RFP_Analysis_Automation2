@@ -16,13 +16,9 @@ from openpyxl.styles import Font
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string
 from pptx import Presentation
-from supabase import create_client, Client  # New import
+from modules.optimization import load_excel_sheets, validate_sheet, df_to_dict_item_attributes, df_to_dict_price, df_to_dict_demand, df_to_dict_baseline_price, df_to_dict_per_item_capacity, df_to_dict_global_capacity, df_to_dict_tiers, df_to_dict_supplier_bid_attributes, rule_to_text, run_optimization
 import logging
 import uuid 
-import modules.optimization 
-from modules.optimization import load_excel_sheets, validate_sheet, df_to_dict_item_attributes, df_to_dict_price, df_to_dict_demand, df_to_dict_baseline_price, df_to_dict_per_item_capacity, df_to_dict_global_capacity, df_to_dict_tiers, df_to_dict_supplier_bid_attributes, rule_to_text, run_optimization
-
-
 
 # testxd
 # # Configure logging
@@ -1918,127 +1914,6 @@ def main():
         st.title('Upload Database Files')
         st.write("Upload your Excel files to Supabase.")
         
-        # # File uploader allowing multiple files
-        # uploaded_files = st.file_uploader(
-        #     "Choose Excel files to upload",
-        #     type=["xlsx"],
-        #     accept_multiple_files=True,
-        #     key='upload_database_file_uploader'
-        # )
-        
-        # if uploaded_files:
-        #     for uploaded_file in uploaded_files:
-        #         if validate_uploaded_file(uploaded_file):
-        #             try:
-        #                 # Read file content
-        #                 file_bytes = uploaded_file.read()
-        #                 original_file_name = uploaded_file.name
-                        
-        #                 # Generate a unique file name
-        #                 unique_file_name = generate_unique_filename(original_file_name)
-                        
-        #                 # Upload the file to Supabase Storage
-        #                 upload_response = supabase.storage.from_(STORAGE_BUCKET).upload(unique_file_name, file_bytes)
-                        
-        #                 # Debugging statements
-        #                 st.write("Upload Response:", upload_response)
-        #                 st.write(f"Response Status: {upload_response.status}")
-        #                 st.write(f"Response Path: {upload_response.path}")
-        #                 st.write(f"Response Full Path: {upload_response.full_path}")
-                        
-        #                 # Check if the upload was successful
-        #                 if upload_response.status in [200, 201]:
-        #                     st.success(f"File '{unique_file_name}' uploaded successfully to Supabase Storage.")
-        #                     logger.info(f"File '{unique_file_name}' uploaded successfully to Supabase Storage.")
-                            
-        #                     # Read Excel file into a DataFrame
-        #                     excel_df = pd.read_excel(BytesIO(file_bytes), engine='openpyxl')
-                            
-        #                     # Add metadata columns
-        #                     excel_df['file_name'] = unique_file_name
-        #                     excel_df['uploaded_by'] = 'test_user'  # Replace with actual user info if available
-        #                     excel_df['upload_time'] = pd.Timestamp.now()
-                            
-        #                     # Ensure columns match the Supabase table
-        #                     required_columns = [
-        #                         'bid_id',
-        #                         'supplier_name',
-        #                         'facility',
-        #                         'baseline_price',
-        #                         'current_price',
-        #                         'bid_volume',
-        #                         'bid_price',
-        #                         'supplier_capacity',
-        #                         'file_name',
-        #                         'uploaded_by',
-        #                         'upload_time'
-        #                     ]
-        #                     # Filter DataFrame to include only required columns
-        #                     excel_df = excel_df[required_columns]
-                            
-        #                     # Convert DataFrame to list of dictionaries
-        #                     records = excel_df.to_dict(orient='records')
-                            
-        #                     # Insert records into Supabase table using upsert to handle duplicates
-        #                     insert_response = supabase.table(DB_TABLE).upsert(records, on_conflict='bid_id').execute()
-                            
-        #                     # Debug: Print the entire response
-        #                     st.write(f"Insert Response: {insert_response}")
-                            
-        #                     if insert_response.status in [200, 201]:
-        #                         st.success(f"Data from '{unique_file_name}' inserted into the database successfully.")
-        #                         logger.info(f"Data from '{unique_file_name}' inserted into the database successfully.")
-        #                     else:
-        #                         error_message = insert_response.error.get('message', 'Unknown error occurred.')
-        #                         st.error(f"Failed to insert data from '{unique_file_name}' into the database. Error: {error_message}")
-        #                         logger.error(f"Failed to insert data from '{unique_file_name}' into the database. Error: {error_message}")
-        #                 else:
-        #                     st.error(f"Failed to upload '{unique_file_name}' to Supabase Storage. Status Code: {upload_response.status}")
-        #                     logger.error(f"Failed to upload '{unique_file_name}' to Supabase Storage. Status Code: {upload_response.status}")
-                    
-        #             except Exception as e:
-        #                 st.error(f"An error occurred while uploading '{uploaded_file.name}': {e}")
-        #                 logger.error(f"An error occurred while uploading '{uploaded_file.name}': {e}")
-        #         else:
-        #             st.warning(f"File '{uploaded_file.name}' is invalid and was not uploaded.")
-        #             logger.warning(f"Invalid file '{uploaded_file.name}' attempted to be uploaded.")
-
-
-
-        # # Test Insert Button
-        # if st.button('Test Insert'):
-        #     try:
-        #         test_record = {
-        #             'bid_id': 'TEST_BID_001',
-        #             'supplier_name': 'Test Supplier',
-        #             'facility': 'Test Facility',
-        #             'baseline_price': 1000,
-        #             'current_price': 900,
-        #             'bid_volume': 50,
-        #             'bid_price': 950,
-        #             'supplier_capacity': 60,
-        #             'file_name': 'test_file.xlsx',
-        #             'uploaded_by': 'test_user',
-        #             'upload_time': pd.Timestamp.now().isoformat()  # Or datetime.datetime.utcnow().isoformat()
-        #         }
-
-
-        #         insert_response = supabase.table(DB_TABLE).upsert([test_record], on_conflict='bid_id').execute()
-
-        #         # Debug: Print the entire response
-        #         st.write(f"Test Insert Response: {insert_response}")
-
-        #         if insert_response.status in [200, 201]:
-        #             st.success("Test record inserted successfully.")
-        #             logger.info("Test record inserted successfully.")
-        #         else:
-        #             error_message = insert_response.error.get('message', 'Unknown error occurred.')
-        #             st.error(f"Failed to insert test record. Error: {error_message}")
-        #             logger.error(f"Failed to insert test record. Error: {error_message}")
-
-        #     except Exception as e:
-        #         st.error(f"An error occurred during test insertion: {e}")
-        #         logger.error(f"An error occurred during test insertion: {e}")
 
 
 
