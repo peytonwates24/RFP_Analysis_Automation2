@@ -503,15 +503,15 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 "Awarded Supplier Capacity", "Baseline Savings", "Rebate %", "Rebate Savings"]
     df_results = df_results[cols]
     
-    home_dir = os.path.expanduser("~")
-    downloads_folder = os.path.join(home_dir, "Downloads")
-    temp_lp_file = os.path.join(downloads_folder, "temp_model.lp")
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    temp_lp_file = os.path.join(temp_dir, "temp_model.lp")
     lp_problem.writeLP(temp_lp_file)
     with open(temp_lp_file, "r") as f:
         lp_text = f.read()
     df_lp = pd.DataFrame({"LP Model": [lp_text]})
-    
-    output_file = os.path.join(downloads_folder, "optimization_results.xlsx")
+
+    output_file = os.path.join(temp_dir, "optimization_results.xlsx")
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df_results.to_excel(writer, sheet_name="Results", index=False)
         pd.DataFrame({"Feasibility Notes": [feasibility_notes]}).to_excel(writer, sheet_name="Feasibility Notes", index=False)
