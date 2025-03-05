@@ -300,90 +300,107 @@ def main():
                 missing = validate_sheet(df, sheet_name)
                 if missing:
                     st.error(f"Missing required columns in '{sheet_name}': {', '.join(missing)}")
-            
-            # Capacity Input Type
-            capacity_mode = st.radio("Select Capacity Input Type:", ("Global Capacity", "Per Item Capacity"))
-            use_global = (capacity_mode == "Global Capacity")
-            
-            # --- Custom Rules Section ---
-            st.markdown("### Custom Rules")
-            col_rt, col_op = st.columns(2)
-            with col_rt:
-                rule_type = st.selectbox("Rule Type", options=["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion", "Bid Exclusions"])
-            with col_op:
-                operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"])
-            rule_input = st.text_input("Rule Input")
-            
-            if "Item Attributes" in sheet_dfs:
-                temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
-                sample_keys = list(next(iter(temp_item_attr.values())).keys())
-                grouping_options = ["All", "Bid ID"] + sample_keys
-            else:
-                grouping_options = ["All", "Bid ID"]
-            col_group, col_group_scope = st.columns(2)
-            with col_group:
-                grouping = st.selectbox("Grouping", options=grouping_options)
-            with col_group_scope:
-                def update_grouping_scope(grouping, item_attr_data):
-                    if grouping == "Bid ID":
-                        vals = sorted(list(item_attr_data.keys()))
-                    else:
-                        vals = sorted({str(item_attr_data[bid].get(grouping, "")).strip() 
-                                    for bid in item_attr_data if str(item_attr_data[bid].get(grouping, "")).strip() != ""})
-                    return ["Apply to all items individually"] + vals
-                if grouping != "All":
-                    grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr))
+
+            # Use an expander to group the Capacity Input and Custom Rules UI elements.
+            with st.expander("Capacity Input & Custom Rules", expanded=True):
+                # Capacity Input Type
+                capacity_mode = st.radio(
+                    "Select Capacity Input Type:", 
+                    ("Global Capacity", "Per Item Capacity"),
+                    key="capacity_input"
+                )
+                use_global = (capacity_mode == "Global Capacity")
+
+                # --- Custom Rules Section ---
+                st.markdown("### Custom Rules")
+                col_rt, col_op = st.columns(2)
+                with col_rt:
+                    rule_type = st.selectbox(
+                        "Rule Type", 
+                        options=["% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", "Supplier Exclusion", "Bid Exclusions"],
+                        key="rule_type_select"
+                    )
+                with col_op:
+                    operator = st.selectbox(
+                        "Operator", 
+                        options=["At least", "At most", "Exactly"],
+                        key="operator_select"
+                    )
+                rule_input = st.text_input("Rule Input", key="rule_input_field")
+
+                if "Item Attributes" in sheet_dfs:
+                    temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                    sample_keys = list(next(iter(temp_item_attr.values())).keys())
+                    grouping_options = ["All", "Bid ID"] + sample_keys
                 else:
-                    grouping_scope = "All"
-            
-            # Auto-populate Supplier Scope from uploaded data
-            suppliers_auto = st.session_state.get("suppliers", [])
-            if suppliers_auto:
-                supplier_scope = st.selectbox("Supplier Scope", options=["All"] + suppliers_auto)
-                if supplier_scope == "All":
-                    supplier_scope = None
-            else:
-                supplier_scope = st.text_input("Supplier Scope (or leave blank)", value="")
-            
-            bid_grouping = None
-            bid_exclusion_value = None
-            if rule_type == "Bid Exclusions":
-                bid_grouping = st.selectbox("Bid Grouping", options=["Milage", "Origin Country"])
-                if bid_grouping != "Milage":
-                    bid_exclusion_value = st.text_input("Bid Exclusion Value", value="")
-            
-            col_add, col_clear = st.columns(2)
-            with col_add:
-                if st.button("Add Rule"):
-                    rule = {
-                        "rule_type": rule_type,
-                        "operator": operator,
-                        "rule_input": rule_input,
-                        "grouping": grouping,
-                        "grouping_scope": grouping_scope,
-                        "supplier_scope": supplier_scope
-                    }
-                    if rule_type == "Bid Exclusions":
-                        rule["bid_grouping"] = bid_grouping
-                        rule["bid_exclusion_value"] = bid_exclusion_value
-                    if "rules_list" not in st.session_state:
+                    grouping_options = ["All", "Bid ID"]
+                col_group, col_group_scope = st.columns(2)
+                with col_group:
+                    grouping = st.selectbox("Grouping", options=grouping_options, key="grouping_select")
+                with col_group_scope:
+                    def update_grouping_scope(grouping, item_attr_data):
+                        if grouping == "Bid ID":
+                            vals = sorted(list(item_attr_data.keys()))
+                        else:
+                            vals = sorted({
+                                str(item_attr_data[bid].get(grouping, "")).strip()
+                                for bid in item_attr_data 
+                                if str(item_attr_data[bid].get(grouping, "")).strip() != ""
+                            })
+                        return ["Apply to all items individually"] + vals
+                    if grouping != "All":
+                        grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr), key="grouping_scope_select")
+                    else:
+                        grouping_scope = "All"
+
+                # Auto-populate Supplier Scope from uploaded data
+                suppliers_auto = st.session_state.get("suppliers", [])
+                if suppliers_auto:
+                    supplier_scope = st.selectbox("Supplier Scope", options=["All"] + suppliers_auto, key="supplier_scope_select")
+                    if supplier_scope == "All":
+                        supplier_scope = None
+                else:
+                    supplier_scope = st.text_input("Supplier Scope (or leave blank)", value="", key="supplier_scope_input")
+
+                bid_grouping = None
+                bid_exclusion_value = None
+                if rule_type == "Bid Exclusions":
+                    bid_grouping = st.selectbox("Bid Grouping", options=["Milage", "Origin Country"], key="bid_grouping_select")
+                    if bid_grouping != "Milage":
+                        bid_exclusion_value = st.text_input("Bid Exclusion Value", value="", key="bid_exclusion_value_input")
+
+                col_add, col_clear = st.columns(2)
+                with col_add:
+                    if st.button("Add Rule", key="add_rule_button"):
+                        rule = {
+                            "rule_type": rule_type,
+                            "operator": operator,
+                            "rule_input": rule_input,
+                            "grouping": grouping,
+                            "grouping_scope": grouping_scope,
+                            "supplier_scope": supplier_scope
+                        }
+                        if rule_type == "Bid Exclusions":
+                            rule["bid_grouping"] = bid_grouping
+                            rule["bid_exclusion_value"] = bid_exclusion_value
+                        if "rules_list" not in st.session_state:
+                            st.session_state.rules_list = []
+                        st.session_state.rules_list.append(rule)
+                        st.success("Rule added.")
+                with col_clear:
+                    if st.button("Clear Rules", key="clear_rules_button"):
                         st.session_state.rules_list = []
-                    st.session_state.rules_list.append(rule)
-                    st.success("Rule added.")
-            with col_clear:
-                if st.button("Clear Rules"):
-                    st.session_state.rules_list = []
-                    st.success("All rules cleared.")
-            
-            if "rules_list" in st.session_state and st.session_state.rules_list:
-                st.markdown("#### Current Rules")
-                for i, r in enumerate(st.session_state.rules_list):
-                    col_rule, col_del = st.columns([0.95, 0.05])
-                    with col_rule:
-                        st.write(f"{i+1}. {rule_to_text(r)}")
-                    with col_del:
-                        if st.button("X", key=f"delete_rule_{i}"):
-                            st.session_state.rules_list.pop(i)
+                        st.success("All rules cleared.")
+
+                if "rules_list" in st.session_state and st.session_state.rules_list:
+                    st.markdown("#### Current Rules")
+                    for i, r in enumerate(st.session_state.rules_list):
+                        col_rule, col_del = st.columns([0.95, 0.05])
+                        with col_rule:
+                            st.write(f"{i+1}. {rule_to_text(r)}")
+                        with col_del:
+                            if st.button("X", key=f"delete_rule_{i}"):
+                                st.session_state.rules_list.pop(i)
             
             # --- End Custom Rules Section ---
             

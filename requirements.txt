@@ -6,3 +6,4 @@ openpyxl>=3.0.10
 XlsxWriter>=3.0.3
 python-pptx>=0.6.21
 supabase
+pulp
