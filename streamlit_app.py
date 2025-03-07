@@ -398,24 +398,32 @@ def main():
                     grouping_options = ["All", "Bid ID"] + sample_keys
                 else:
                     grouping_options = ["All", "Bid ID"]
-                col_group, col_group_scope = st.columns([1, 1])
-                with col_group:
-                    grouping = st.selectbox("Grouping", options=grouping_options, key="grouping_select")
-                with col_group_scope:
-                    def update_grouping_scope(grouping, item_attr_data):
-                        if grouping == "Bid ID":
-                            vals = sorted(list(item_attr_data.keys()))
+
+                # If rule type is Exclude Bids, disable the grouping dropdown.
+                if rule_type == "Exclude Bids":
+                    grouping = st.selectbox("Grouping", options=grouping_options, key="grouping_select", disabled=True, index=0)
+                    # Automatically set grouping_scope to "All" since grouping is disabled.
+                    grouping_scope = "All"
+                else:
+                    col_group, col_group_scope = st.columns([1, 1])
+                    with col_group:
+                        grouping = st.selectbox("Grouping", options=grouping_options, key="grouping_select")
+                    with col_group_scope:
+                        def update_grouping_scope(grouping, item_attr_data):
+                            if grouping == "Bid ID":
+                                vals = sorted(list(item_attr_data.keys()))
+                            else:
+                                vals = sorted({
+                                    str(item_attr_data[bid].get(grouping, "")).strip()
+                                    for bid in item_attr_data
+                                    if str(item_attr_data[bid].get(grouping, "")).strip() != ""
+                                })
+                            return ["Apply to all items individually"] + vals
+                        if grouping != "All":
+                            grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr), key="grouping_scope_select")
                         else:
-                            vals = sorted({
-                                str(item_attr_data[bid].get(grouping, "")).strip() 
-                                for bid in item_attr_data 
-                                if str(item_attr_data[bid].get(grouping, "")).strip() != ""
-                            })
-                        return ["Apply to all items individually"] + vals
-                    if grouping != "All":
-                        grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr), key="grouping_scope_select")
-                    else:
-                        grouping_scope = "All"
+                            grouping_scope = "All"
+
                 
                 # --- Supplier Scope ---
                 # For rule types where supplier scope is not applicable, disable it.
