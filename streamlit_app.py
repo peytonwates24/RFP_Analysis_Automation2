@@ -16,7 +16,7 @@ from openpyxl.styles import Font
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string
 from pptx import Presentation
-from modules.optimization import load_excel_sheets, validate_sheet, df_to_dict_item_attributes, df_to_dict_price, df_to_dict_demand, df_to_dict_baseline_price, df_to_dict_per_item_capacity, df_to_dict_global_capacity, df_to_dict_tiers, df_to_dict_supplier_bid_attributes, rule_to_text, run_optimization
+from modules.optimization import df_to_dict_capacity, load_excel_sheets, validate_sheet, df_to_dict_item_attributes, df_to_dict_price, df_to_dict_demand, df_to_dict_baseline_price, df_to_dict_per_item_capacity, df_to_dict_global_capacity, df_to_dict_tiers, df_to_dict_supplier_bid_attributes, rule_to_text, run_optimization
 import logging
 import uuid 
 
@@ -307,12 +307,11 @@ def main():
 
             with st.expander("Capacity Input & Custom Rules", expanded=True):
                 # --- Capacity Input Type ---
-                capacity_mode = st.radio(
-                    "Select Capacity Input Type:", 
-                    ("Global Capacity", "Per Item Capacity"),
-                    key="capacity_input"
-                )
-                use_global = (capacity_mode == "Global Capacity")
+                if "Capacity" in sheet_dfs:
+                    capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
+                else:
+                    st.error("Capacity sheet is missing.")
+                    return
 
                 # --- Rule Type and Operator (side by side) ---
                 col_rt, col_op = st.columns([1, 1])
@@ -325,7 +324,8 @@ def main():
                             "# of Transitions", 
                             "# of Suppliers", 
                             "Supplier Exclusions", 
-                            "Exclude Bids"
+                            "Exclude Bids",
+                            "Each Supplier is Awarded"
                         ],
                         key="rule_type_select"
                     )
@@ -353,6 +353,38 @@ def main():
                     rule_input = st.number_input("Rule Input (number)", key="rule_input_field", step=1, min_value=0)
                 elif rule_type == "Supplier Exclusions":
                     rule_input = st.text_input("Rule Input", value="", disabled=True, key="rule_input_field")
+                elif rule_type == "Each Supplier is Awarded":
+                    # Use columns to display the rule input field and value type selector side by side.
+                    col_val = st.columns([2, 1])
+                    with col_val[0]:
+                        # Check current value type selection stored in session state; default to "Percentage"
+                        current_val_type = st.session_state.get("each_supplier_awarded_value_type", "Percentage")
+                        if current_val_type == "Percentage":
+                            # For percentage, restrict value between 0 and 100.
+                            rule_input = st.number_input(
+                                "Rule Input (%)", 
+                                key="rule_input_field", 
+                                min_value=0.0, 
+                                max_value=100.0, 
+                                step=0.1
+                            )
+                        else:
+                            # For a number, no upper bound is enforced (or set a different one if needed).
+                            rule_input = st.number_input(
+                                "Rule Input (quantity)", 
+                                key="rule_input_field", 
+                                min_value=0, 
+                                step=1
+                            )
+                    with col_val[1]:
+                        # Value type selector appears to the right of the rule input.
+                        value_type = st.selectbox(
+                            "Value Type", 
+                            options=["Percentage", "Number"], 
+                            key="value_type_select"
+                        )
+                        st.session_state.each_supplier_awarded_value_type = value_type
+
                 elif rule_type == "Exclude Bids":
                     # For Exclude Bids, we'll set rule_input later based on Bid Grouping selection.
                     rule_input = None  
@@ -485,6 +517,8 @@ def main():
                         if rule_type in ["Bid Exclusions", "Exclude Bids"]:
                             rule["bid_grouping"] = bid_grouping
                             rule["bid_exclusion_value"] = bid_exclusion_value
+                        if rule_type == "Each Supplier is Awarded":
+                            rule["value_type"] = value_type  # New key for percentage vs number.
                         st.session_state.rules_list.append(rule)
                         st.success("Rule added.")
                 with col_clear:
@@ -509,7 +543,7 @@ def main():
             # --- End Custom Rules Section ---
             
             required_sheet_names = ["Item Attributes", "Price", "Demand", "Rebate Tiers", "Discount Tiers",
-                                    "Baseline Price", "Per Item Capacity", "Global Capacity", "Supplier Bid Attributes"]
+                                    "Baseline Price", "Capacity", "Supplier Bid Attributes"]
             if all(sheet in sheet_dfs for sheet in required_sheet_names):
                 try:
                     item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
@@ -530,7 +564,7 @@ def main():
                         with st.spinner("Running optimization..."):
                             output_file, feasibility_notes, model_status = run_optimization(
                                 use_global,
-                                global_capacity_dict if use_global else per_item_capacity_dict,
+                                capacity_dict,
                                 demand_dict,
                                 item_attr_dict,
                                 price_dict,

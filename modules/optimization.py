@@ -139,6 +139,48 @@ def compute_U_spend(per_item_cap, price_data, suppliers):
         total[s] = tot
     return total
 
+def df_to_dict_capacity(df):
+    """
+    Converts the 'Capacity' sheet into a dictionary.
+    The sheet is expected to have the following columns:
+      - Supplier Name
+      - Capacity Scope
+      - Scope Value
+      - Capacity
+
+    Returns a dictionary with keys as (Supplier Name, Capacity Scope, Scope Value)
+    and values as the capacity (float).
+    """
+    # Strip column names to avoid leading/trailing spaces
+    df.columns = [col.strip() for col in df.columns]
+
+    # Define required columns
+    required = ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"]
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise Exception("Missing required columns in Capacity sheet: " + ", ".join(missing))
+    
+    # Drop rows that have missing values in any of the required columns
+    df = df.dropna(subset=required)
+    
+    # Clean up string columns
+    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
+    df["Capacity Scope"] = df["Capacity Scope"].astype(str).str.strip()
+    df["Scope Value"] = df["Scope Value"].astype(str).str.strip()
+
+    capacity_dict = {}
+    for _, row in df.iterrows():
+        supplier = row["Supplier Name"]
+        scope = row["Capacity Scope"]
+        scope_value = row["Scope Value"]
+        try:
+            capacity = float(row["Capacity"])
+        except Exception as e:
+            capacity = 0
+        capacity_dict[(supplier, scope, scope_value)] = capacity
+
+    return capacity_dict
+
 #############################################
 # OPTIMIZATION MODEL FUNCTION
 #############################################
@@ -395,6 +437,41 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
             if debug:
                 print(f"DEBUG: Enforcing total transitions {operator} {transitions_target} over items {items_group}")
+
+            elif rule["rule_type"] == "Each Supplier is Awarded":
+                # Determine which suppliers this rule applies to.
+                if rule["supplier_scope"] is None:
+                    applicable_suppliers = suppliers
+                else:
+                    applicable_suppliers = [rule["supplier_scope"]]
+                
+                # Determine the group of bids based on grouping and grouping_scope.
+                if rule["grouping"] == "All":
+                    items_group = items_dynamic
+                elif rule["grouping"] == "Bid ID":
+                    items_group = [rule["grouping_scope"]]
+                else:
+                    items_group = [j for j in items_dynamic 
+                                if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                
+                # For percentage type, the target is relative to the total demand of the group.
+                total_demand_group = sum(demand_data[j] for j in items_group)
+                
+                for s in applicable_suppliers:
+                    total_awarded = pulp.lpSum(x[(s, j)] for j in items_group)
+                    # Determine target based on the value type.
+                    if rule.get("value_type", "Number") == "Percentage":
+                        target = (float(rule["rule_input"]) / 100.0) * total_demand_group
+                    else:
+                        target = float(rule["rule_input"])
+                    
+                    if rule["operator"] == "At least":
+                        lp_problem += total_awarded >= target, f"EachSupplierAwarded_{s}_{r_idx}"
+                    elif rule["operator"] == "At most":
+                        lp_problem += total_awarded <= target, f"EachSupplierAwarded_{s}_{r_idx}"
+                    elif rule["operator"] == "Equal to":
+                        lp_problem += total_awarded == target, f"EachSupplierAwarded_{s}_{r_idx}"
+
         elif rule["rule_type"] == "Bid Exclusions":
             # Process Bid Exclusions rule.
             if rule["grouping"] == "All" or rule["grouping_scope"] in ["All", "Apply to all items individually"]:
