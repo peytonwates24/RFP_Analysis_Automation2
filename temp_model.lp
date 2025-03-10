@@ -96,6 +96,76 @@ RebateTierUpper_B_0: rebate_B + 5723000 y_rebate_B_0 <= 5723000
 RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 5723000 y_rebate_B_1 <= 5723000
 RebateTierUpper_C_0: rebate_C + 5044000 y_rebate_C_0 <= 5044000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 5044000 y_rebate_C_1 <= 5044000
+RuleSingleSupplier_0_1: w_0_1_A + w_0_1_B + w_0_1_C = 1
+RuleSingleSupplier_1_2: w_1_2_A + w_1_2_B + w_1_2_C = 1
+RuleSingleSupplier_2_10: w_2_10_A + w_2_10_B + w_2_10_C = 1
+RuleSingleSupplier_3_3: w_3_3_A + w_3_3_B + w_3_3_C = 1
+RuleSingleSupplier_4_4: w_4_4_A + w_4_4_B + w_4_4_C = 1
+RuleSingleSupplier_5_5: w_5_5_A + w_5_5_B + w_5_5_C = 1
+RuleSingleSupplier_6_6: w_6_6_A + w_6_6_B + w_6_6_C = 1
+RuleSingleSupplier_7_7: w_7_7_A + w_7_7_B + w_7_7_C = 1
+RuleSingleSupplier_8_8: w_8_8_A + w_8_8_B + w_8_8_C = 1
+RuleSingleSupplier_9_9: w_9_9_A + w_9_9_B + w_9_9_C = 1
+RuleSupplierIndicatorLB_0_1_A: - 0.001 w_0_1_A + x_A_1 >= 0
+RuleSupplierIndicatorLB_0_1_B: - 0.001 w_0_1_B + x_B_1 >= 0
+RuleSupplierIndicatorLB_0_1_C: - 0.001 w_0_1_C + x_C_1 >= 0
+RuleSupplierIndicatorLB_1_2_A: - 0.001 w_1_2_A + x_A_2 >= 0
+RuleSupplierIndicatorLB_1_2_B: - 0.001 w_1_2_B + x_B_2 >= 0
+RuleSupplierIndicatorLB_1_2_C: - 0.001 w_1_2_C + x_C_2 >= 0
+RuleSupplierIndicatorLB_2_10_A: - 0.001 w_2_10_A + x_A_10 >= 0
+RuleSupplierIndicatorLB_2_10_B: - 0.001 w_2_10_B + x_B_10 >= 0
+RuleSupplierIndicatorLB_2_10_C: - 0.001 w_2_10_C + x_C_10 >= 0
+RuleSupplierIndicatorLB_3_3_A: - 0.001 w_3_3_A + x_A_3 >= 0
+RuleSupplierIndicatorLB_3_3_B: - 0.001 w_3_3_B + x_B_3 >= 0
+RuleSupplierIndicatorLB_3_3_C: - 0.001 w_3_3_C + x_C_3 >= 0
+RuleSupplierIndicatorLB_4_4_A: - 0.001 w_4_4_A + x_A_4 >= 0
+RuleSupplierIndicatorLB_4_4_B: - 0.001 w_4_4_B + x_B_4 >= 0
+RuleSupplierIndicatorLB_4_4_C: - 0.001 w_4_4_C + x_C_4 >= 0
+RuleSupplierIndicatorLB_5_5_A: - 0.001 w_5_5_A + x_A_5 >= 0
+RuleSupplierIndicatorLB_5_5_B: - 0.001 w_5_5_B + x_B_5 >= 0
+RuleSupplierIndicatorLB_5_5_C: - 0.001 w_5_5_C + x_C_5 >= 0
+RuleSupplierIndicatorLB_6_6_A: - 0.001 w_6_6_A + x_A_6 >= 0
+RuleSupplierIndicatorLB_6_6_B: - 0.001 w_6_6_B + x_B_6 >= 0
+RuleSupplierIndicatorLB_6_6_C: - 0.001 w_6_6_C + x_C_6 >= 0
+RuleSupplierIndicatorLB_7_7_A: - 0.001 w_7_7_A + x_A_7 >= 0
+RuleSupplierIndicatorLB_7_7_B: - 0.001 w_7_7_B + x_B_7 >= 0
+RuleSupplierIndicatorLB_7_7_C: - 0.001 w_7_7_C + x_C_7 >= 0
+RuleSupplierIndicatorLB_8_8_A: - 0.001 w_8_8_A + x_A_8 >= 0
+RuleSupplierIndicatorLB_8_8_B: - 0.001 w_8_8_B + x_B_8 >= 0
+RuleSupplierIndicatorLB_8_8_C: - 0.001 w_8_8_C + x_C_8 >= 0
+RuleSupplierIndicatorLB_9_9_A: - 0.001 w_9_9_A + x_A_9 >= 0
+RuleSupplierIndicatorLB_9_9_B: - 0.001 w_9_9_B + x_B_9 >= 0
+RuleSupplierIndicatorLB_9_9_C: - 0.001 w_9_9_C + x_C_9 >= 0
+RuleSupplierIndicator_0_1_A: - 1000000000 w_0_1_A + x_A_1 <= 0
+RuleSupplierIndicator_0_1_B: - 1000000000 w_0_1_B + x_B_1 <= 0
+RuleSupplierIndicator_0_1_C: - 1000000000 w_0_1_C + x_C_1 <= 0
+RuleSupplierIndicator_1_2_A: - 1000000000 w_1_2_A + x_A_2 <= 0
+RuleSupplierIndicator_1_2_B: - 1000000000 w_1_2_B + x_B_2 <= 0
+RuleSupplierIndicator_1_2_C: - 1000000000 w_1_2_C + x_C_2 <= 0
+RuleSupplierIndicator_2_10_A: - 1000000000 w_2_10_A + x_A_10 <= 0
+RuleSupplierIndicator_2_10_B: - 1000000000 w_2_10_B + x_B_10 <= 0
+RuleSupplierIndicator_2_10_C: - 1000000000 w_2_10_C + x_C_10 <= 0
+RuleSupplierIndicator_3_3_A: - 1000000000 w_3_3_A + x_A_3 <= 0
+RuleSupplierIndicator_3_3_B: - 1000000000 w_3_3_B + x_B_3 <= 0
+RuleSupplierIndicator_3_3_C: - 1000000000 w_3_3_C + x_C_3 <= 0
+RuleSupplierIndicator_4_4_A: - 1000000000 w_4_4_A + x_A_4 <= 0
+RuleSupplierIndicator_4_4_B: - 1000000000 w_4_4_B + x_B_4 <= 0
+RuleSupplierIndicator_4_4_C: - 1000000000 w_4_4_C + x_C_4 <= 0
+RuleSupplierIndicator_5_5_A: - 1000000000 w_5_5_A + x_A_5 <= 0
+RuleSupplierIndicator_5_5_B: - 1000000000 w_5_5_B + x_B_5 <= 0
+RuleSupplierIndicator_5_5_C: - 1000000000 w_5_5_C + x_C_5 <= 0
+RuleSupplierIndicator_6_6_A: - 1000000000 w_6_6_A + x_A_6 <= 0
+RuleSupplierIndicator_6_6_B: - 1000000000 w_6_6_B + x_B_6 <= 0
+RuleSupplierIndicator_6_6_C: - 1000000000 w_6_6_C + x_C_6 <= 0
+RuleSupplierIndicator_7_7_A: - 1000000000 w_7_7_A + x_A_7 <= 0
+RuleSupplierIndicator_7_7_B: - 1000000000 w_7_7_B + x_B_7 <= 0
+RuleSupplierIndicator_7_7_C: - 1000000000 w_7_7_C + x_C_7 <= 0
+RuleSupplierIndicator_8_8_A: - 1000000000 w_8_8_A + x_A_8 <= 0
+RuleSupplierIndicator_8_8_B: - 1000000000 w_8_8_B + x_B_8 <= 0
+RuleSupplierIndicator_8_8_C: - 1000000000 w_8_8_C + x_C_8 <= 0
+RuleSupplierIndicator_9_9_A: - 1000000000 w_9_9_A + x_A_9 <= 0
+RuleSupplierIndicator_9_9_B: - 1000000000 w_9_9_B + x_B_9 <= 0
+RuleSupplierIndicator_9_9_C: - 1000000000 w_9_9_C + x_C_9 <= 0
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -145,6 +215,36 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
+w_0_1_A
+w_0_1_B
+w_0_1_C
+w_1_2_A
+w_1_2_B
+w_1_2_C
+w_2_10_A
+w_2_10_B
+w_2_10_C
+w_3_3_A
+w_3_3_B
+w_3_3_C
+w_4_4_A
+w_4_4_B
+w_4_4_C
+w_5_5_A
+w_5_5_B
+w_5_5_C
+w_6_6_A
+w_6_6_B
+w_6_6_C
+w_7_7_A
+w_7_7_B
+w_7_7_C
+w_8_8_A
+w_8_8_B
+w_8_8_C
+w_9_9_A
+w_9_9_B
+w_9_9_C
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
