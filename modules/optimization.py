@@ -1,181 +1,281 @@
 import os
-import uuid
 import pandas as pd
 import pulp
-import streamlit as st
-from openpyxl import load_workbook
+
+# Global constant for Big-M constraints.
+M = 1e9
 
 #############################################
-# REQUIRED COLUMNS & HELPER FUNCTIONS FOR EXCEL INTAKE
+# REQUIRED COLUMNS for Excel Validation
 #############################################
-
+# For "Item Attributes", only "Bid ID" and "Incumbent" are required.
+# For "Supplier Bid Attributes", only "Supplier Name" and "Bid ID" are required.
 REQUIRED_COLUMNS = {
-    "Item Attributes": ["Bid ID", "Incumbent", "Capacity Group"],
-    "Supplier Bid Attributes": ["Supplier Name", "Bid ID"],
+    "Item Attributes": ["Bid ID", "Incumbent"],
     "Price": ["Supplier Name", "Bid ID", "Price"],
     "Demand": ["Bid ID", "Demand"],
+    "Baseline Price": ["Bid ID", "Baseline Price"],
+    "Capacity": ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
     "Rebate Tiers": ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
     "Discount Tiers": ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
-    "Baseline Price": ["Bid ID", "Baseline Price"],
-    "Per Item Capacity": ["Supplier Name", "Bid ID", "Capacity"],
-    "Global Capacity": ["Supplier Name", "Capacity Group", "Capacity"]
+    "Supplier Bid Attributes": ["Supplier Name", "Bid ID"]
 }
 
+#############################################
+# Helper Functions for Excel Loading & Validation
+#############################################
 def load_excel_sheets(uploaded_file):
-    sheet_dfs = {}
-    workbook = load_workbook(filename=uploaded_file, data_only=True)
-    for sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
-        data = [list(row) for row in sheet.iter_rows(values_only=True)]
-        if data:
-            if all(isinstance(x, str) for x in data[0]):
-                df = pd.DataFrame(data[1:], columns=[str(x).strip() for x in data[0]])
-            else:
-                df = pd.DataFrame(data)
-            sheet_dfs[sheet_name] = df.copy()
-    return sheet_dfs
+    """
+    Load all sheets from an uploaded Excel file into a dictionary of DataFrames.
+    """
+    xls = pd.ExcelFile(uploaded_file)
+    sheets = {}
+    for sheet in xls.sheet_names:
+        sheets[sheet] = pd.read_excel(xls, sheet_name=sheet)
+    return sheets
 
 def validate_sheet(df, sheet_name):
+    """
+    Check that the DataFrame contains all required columns for the specified sheet.
+    Returns a list of missing columns.
+    """
     required = REQUIRED_COLUMNS.get(sheet_name, [])
     missing = [col for col in required if col not in df.columns]
     return missing
 
+#############################################
+# Data Conversion Helper Functions
+#############################################
 def df_to_dict_item_attributes(df):
-    df.columns = [col.strip() for col in df.columns]
-    bid_id_col = None
-    for col in df.columns:
-        if col.lower() == "bid id":
-            bid_id_col = col
-            break
-    if bid_id_col is None:
-        raise Exception("The 'Bid ID' column is missing in the Item Attributes sheet.")
-    df = df.dropna(subset=[bid_id_col])
-    df[bid_id_col] = df[bid_id_col].astype(str).str.strip()
-    return {bid: row.to_dict() for bid, row in df.set_index(bid_id_col).iterrows()}
-
-def df_to_dict_supplier_bid_attributes(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Supplier Name", "Bid ID"])
-    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
-    df["Bid ID"] = df["Bid ID"].astype(str).str.strip()
-    result = {}
+    """
+    Convert the "Item Attributes" sheet into a dictionary keyed by Bid ID.
+    Only "Bid ID" and "Incumbent" are required; all other columns are read in.
+    """
+    d = {}
     for _, row in df.iterrows():
-        key = (row["Supplier Name"], row["Bid ID"])
-        result[key] = row.drop(labels=["Supplier Name", "Bid ID"]).to_dict()
-    return result
+        bid = str(row["Bid ID"]).strip()
+        d[bid] = row.to_dict()
+        d[bid].pop("Bid ID", None)
+    return d
 
 def df_to_dict_price(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Supplier Name", "Bid ID", "Price"])
-    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
-    df["Bid ID"] = df["Bid ID"].astype(str).str.strip()
-    result = {}
+    """
+    Convert the "Price" sheet into a dictionary keyed by (Supplier Name, Bid ID) with price values.
+    """
+    d = {}
     for _, row in df.iterrows():
-        result[(row["Supplier Name"], row["Bid ID"])] = float(row["Price"])
-    return result
+        supplier = str(row["Supplier Name"]).strip()
+        bid = str(row["Bid ID"]).strip()
+        d[(supplier, bid)] = row["Price"]
+    return d
 
 def df_to_dict_demand(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Bid ID", "Demand"])
-    df["Bid ID"] = df["Bid ID"].astype(str).str.strip()
-    return {bid: float(demand) for bid, demand in df.set_index("Bid ID")["Demand"].to_dict().items()}
+    """
+    Convert the "Demand" sheet into a dictionary keyed by Bid ID with demand values.
+    """
+    d = {}
+    for _, row in df.iterrows():
+        bid = str(row["Bid ID"]).strip()
+        d[bid] = row["Demand"]
+    return d
 
 def df_to_dict_baseline_price(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Bid ID", "Baseline Price"])
-    df["Bid ID"] = df["Bid ID"].astype(str).str.strip()
-    return {bid: float(price) for bid, price in df.set_index("Bid ID")["Baseline Price"].to_dict().items()}
-
-def df_to_dict_per_item_capacity(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Supplier Name", "Bid ID", "Capacity"])
-    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
-    df["Bid ID"] = df["Bid ID"].astype(str).str.strip()
-    result = {}
+    """
+    Convert the "Baseline Price" sheet into a dictionary keyed by Bid ID with baseline prices.
+    """
+    d = {}
     for _, row in df.iterrows():
-        result[(row["Supplier Name"], row["Bid ID"])] = float(row["Capacity"])
-    return result
+        bid = str(row["Bid ID"]).strip()
+        d[bid] = row["Baseline Price"]
+    return d
 
-def df_to_dict_global_capacity(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Supplier Name", "Capacity Group", "Capacity"])
-    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
-    df["Capacity Group"] = df["Capacity Group"].astype(str).str.strip()
-    result = {}
+def df_to_dict_capacity(df):
+    """
+    Convert the "Capacity" sheet into a dictionary keyed by (Supplier Name, Capacity Scope, Scope Value)
+    with capacity values.
+    """
+    d = {}
     for _, row in df.iterrows():
-        result[(row["Supplier Name"], row["Capacity Group"])] = float(row["Capacity"])
-    return result
+        supplier = str(row["Supplier Name"]).strip()
+        cap_scope = str(row["Capacity Scope"]).strip()
+        scope_value = str(row["Scope Value"]).strip()
+        d[(supplier, cap_scope, scope_value)] = row["Capacity"]
+    return d
 
 def df_to_dict_tiers(df):
-    df.columns = [col.strip() for col in df.columns]
-    df = df.dropna(subset=["Supplier Name", "Min", "Max", "Percentage"])
-    df["Supplier Name"] = df["Supplier Name"].astype(str).str.strip()
-    tiers = {}
-    for supplier in df["Supplier Name"].unique():
-        sub_df = df[df["Supplier Name"] == supplier]
-        tier_list = []
-        for _, row in sub_df.iterrows():
-            tier_list.append((float(row["Min"]), float(row["Max"]), float(row["Percentage"]),
-                              row.get("Scope Attribute", None), row.get("Scope Value", None)))
-        tiers[supplier] = tier_list
-    return tiers
+    """
+    Convert a tiers sheet (either "Rebate Tiers" or "Discount Tiers") into a dictionary keyed by Supplier Name.
+    Each value is a list of tuples: (Min, Max, Percentage, Scope Attribute, Scope Value)
+    """
+    d = {}
+    for _, row in df.iterrows():
+        supplier = str(row["Supplier Name"]).strip()
+        tier = (row["Min"], row["Max"], row["Percentage"], row.get("Scope Attribute"), row.get("Scope Value"))
+        if supplier in d:
+            d[supplier].append(tier)
+        else:
+            d[supplier] = [tier]
+    return d
+
+def df_to_dict_supplier_bid_attributes(df):
+    """
+    Convert the "Supplier Bid Attributes" sheet into a dictionary keyed by (Supplier Name, Bid ID)
+    with all bid attribute information (all columns besides Supplier Name and Bid ID).
+    """
+    d = {}
+    for _, row in df.iterrows():
+        supplier = str(row["Supplier Name"]).strip()
+        bid = str(row["Bid ID"]).strip()
+        attr = row.to_dict()
+        attr.pop("Supplier Name", None)
+        attr.pop("Bid ID", None)
+        d[(supplier, bid)] = attr
+    return d
 
 #############################################
-# COMPUTE HELPER FUNCTIONS (VOLUME & SPEND)
+# Helper for Custom Rule Text Representation
 #############################################
-
-def compute_U_volume(per_item_cap, suppliers):
-    total = {}
-    for s in suppliers:
-        tot = sum(per_item_cap.get((s, bid), 0) for (sup, bid) in per_item_cap.keys() if sup == s)
-        total[s] = tot
-    return total
-
-def compute_U_spend(per_item_cap, price_data, suppliers):
-    total = {}
-    for s in suppliers:
-        tot = sum(price_data.get((s, bid), 0) * per_item_cap.get((s, bid), 0)
-                  for (sup, bid) in per_item_cap.keys() if sup == s)
-        total[s] = tot
-    return total
+def rule_to_text(rule):
+    """
+    Return a string representation of a custom rule.
+    """
+    if rule["rule_type"] == "% of Volume Awarded":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"% Vol: {rule['operator']} {rule['rule_input']}% of {grouping_text} awarded to {rule['supplier_scope']}"
+    elif rule["rule_type"] == "# of Volume Awarded":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"# Vol: {rule['operator']} {rule['rule_input']} units of {grouping_text} awarded to {rule['supplier_scope']}"
+    elif rule["rule_type"] == "# of transitions":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"# Transitions: {rule['operator']} {rule['rule_input']} transitions in {grouping_text}"
+    elif rule["rule_type"] == "# of suppliers":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"# Suppliers: {rule['operator']} {rule['rule_input']} unique suppliers in {grouping_text}"
+    elif rule["rule_type"] == "Supplier Exclusion":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"Exclude {rule['supplier_scope']} from {grouping_text}"
+    elif rule["rule_type"] == "Bid Exclusions":
+        bid_grouping = rule.get("bid_grouping", "Not specified")
+        if is_bid_attribute_numeric(bid_grouping, {}):
+            return f"Bid Exclusions on {bid_grouping}: {rule['operator']} {rule['rule_input']}"
+        else:
+            bid_exclusion_value = rule.get("bid_exclusion_value", "Not specified")
+            return f"Bid Exclusions on {bid_grouping}: exclude '{bid_exclusion_value}'"
+    elif rule["rule_type"] == "# Minimum volume awarded":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"# Min Vol: at least {rule['rule_input']} units in {grouping_text}"
+    elif rule["rule_type"] == "% Minimum volume awarded":
+        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
+        return f"% Min Vol: at least {rule['rule_input']}% in {grouping_text}"
+    else:
+        return str(rule)
 
 #############################################
-# OPTIMIZATION MODEL FUNCTION
+# Helper: Determine if a bid attribute is numeric.
 #############################################
+def is_bid_attribute_numeric(bid_group, supplier_bid_attr_dict):
+    """
+    Determine if the specified bid attribute (bid_group) is numeric.
+    It checks the first non-None occurrence in supplier_bid_attr_dict.
+    """
+    for key, attr in supplier_bid_attr_dict.items():
+        if bid_group in attr and attr[bid_group] is not None:
+            try:
+                float(attr[bid_group])
+                return True
+            except:
+                return False
+    return False
 
-def run_optimization(use_global, capacity_data, demand_data, item_attr_data, price_data,
-                     rebate_tiers, discount_tiers, baseline_price_data, per_item_capacity,
-                     supplier_bid_attributes, suppliers, rules=[]):
-    debug = True
+#############################################
+# Main Optimization Function
+#############################################
+def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
+                     rebate_tiers, discount_tiers, baseline_price_data, rules=[],
+                     supplier_bid_attr_dict=None, suppliers=None):
+    """
+    Run the sourcing optimization model.
+
+    Parameters:
+      - capacity_data: dict keyed by (Supplier Name, Capacity Scope, Scope Value) with capacities.
+      - demand_data: dict keyed by Bid ID with demand values.
+      - item_attr_data: dict keyed by Bid ID with item attributes.
+      - price_data: dict keyed by (Supplier Name, Bid ID) with prices.
+      - rebate_tiers: dict keyed by Supplier; each value is a list of tuples (Min, Max, Percentage, Scope Attribute, Scope Value).
+      - discount_tiers: dict keyed by Supplier; each value is a list of tuples (Min, Max, Percentage, Scope Attribute, Scope Value).
+      - baseline_price_data: dict keyed by Bid ID with baseline prices.
+      - rules: list of custom rule dictionaries.
+      - supplier_bid_attr_dict: dict keyed by (Supplier Name, Bid ID) with supplier bid attributes.
+      - suppliers: list of supplier names.
+
+    Returns:
+      - output_file (str): path to an Excel file with optimization results.
+      - feasibility_notes (str): feasibility information.
+      - model_status (str): PuLP model status.
+    """
+    if supplier_bid_attr_dict is None:
+        raise ValueError("supplier_bid_attr_dict must be provided from the 'Supplier Bid Attributes' sheet.")
+    if suppliers is None:
+        raise ValueError("suppliers must be provided (extracted from the 'Price' sheet).")
+    
     items_dynamic = list(demand_data.keys())
+    
+    # Create transition variables (for non-incumbent supplier transitions).
     T = {}
-    for bid in items_dynamic:
-        incumbent = item_attr_data[bid].get("Incumbent")
+    for j in items_dynamic:
+        incumbent = item_attr_data[j].get("Incumbent")
         for s in suppliers:
             if s != incumbent:
-                T[(bid, s)] = pulp.LpVariable(f"T_{bid}_{s}", cat='Binary')
-    U_volume = compute_U_volume(per_item_capacity, suppliers)
-    U_spend = compute_U_spend(per_item_capacity, price_data, suppliers)
+                T[(j, s)] = pulp.LpVariable(f"T_{j}_{s}", cat='Binary')
     
     lp_problem = pulp.LpProblem("Sourcing_with_MultiTier_Rebates_Discounts", pulp.LpMinimize)
     
-    x = {(s, bid): pulp.LpVariable(f"x_{s}_{bid}", lowBound=0, cat='Continuous')
-         for s in suppliers for bid in items_dynamic}
+    # Decision variables.
+    x = {(s, j): pulp.LpVariable(f"x_{s}_{j}", lowBound=0, cat='Continuous')
+         for s in suppliers for j in items_dynamic}
     S0 = {s: pulp.LpVariable(f"S0_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     S = {s: pulp.LpVariable(f"S_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     V = {s: pulp.LpVariable(f"V_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     
-    for bid in items_dynamic:
-        for s in suppliers:
-            if (bid, s) in T:
-                lp_problem += x[(s, bid)] <= demand_data[bid] * T[(bid, s)], f"Transition_{bid}_{s}"
+    # Demand constraints.
+    for j in items_dynamic:
+        lp_problem += pulp.lpSum(x[(s, j)] for s in suppliers) == demand_data[j], f"Demand_{j}"
     
+    # Transition constraints.
+    for j in items_dynamic:
+        for s in suppliers:
+            if (j, s) in T:
+                lp_problem += x[(s, j)] <= demand_data[j] * T[(j, s)], f"Transition_{j}_{s}"
+    
+    # Capacity constraints.
+    for (s, cap_scope, scope_value), cap in capacity_data.items():
+        if cap_scope == "Bid ID":
+            items_group = [scope_value] if scope_value in item_attr_data else []
+        else:
+            items_group = [j for j in items_dynamic if str(item_attr_data[j].get(cap_scope, "")).strip() == str(scope_value).strip()]
+        if items_group:
+            lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= cap, f"Capacity_{s}_{cap_scope}_{scope_value}"
+    
+    # Base spend and volume.
+    for s in suppliers:
+        lp_problem += S0[s] == pulp.lpSum(price_data[(s, j)] * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
+        lp_problem += V[s] == pulp.lpSum(x[(s, j)] for j in items_dynamic), f"Volume_{s}"
+    
+    # Compute supplier-specific Big-M values.
+    max_price_val = max(price_data.values())
+    U_spend = {}
+    for s in suppliers:
+        total_cap = sum(cap for ((sup, _, _), cap) in capacity_data.items() if sup == s)
+        U_spend[s] = total_cap * max_price_val
+    
+    # Discount tier constraints.
     z_discount = {}
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
         z_discount[s] = {k: pulp.LpVariable(f"z_discount_{s}_{k}", cat='Binary') for k in range(len(tiers))}
         lp_problem += pulp.lpSum(z_discount[s][k] for k in range(len(tiers))) == 1, f"DiscountTierSelect_{s}"
     
+    # Rebate tier constraints.
     y_rebate = {}
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
@@ -187,96 +287,79 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
     
     lp_problem += pulp.lpSum(S[s] - rebate_var[s] for s in suppliers), "Total_Effective_Cost"
     
-    for bid in items_dynamic:
-        lp_problem += pulp.lpSum(x[(s, bid)] for s in suppliers) == demand_data[bid], f"Demand_{bid}"
-    
-    if use_global:
-        supplier_capacity_groups = {}
-        for s in suppliers:
-            supplier_capacity_groups[s] = {}
-        for bid in items_dynamic:
-            group = item_attr_data[bid].get("Capacity Group")
-            if group is not None:
-                for s in suppliers:
-                    supplier_capacity_groups[s].setdefault(group, []).append(bid)
-        for s in suppliers:
-            for group, bid_list in supplier_capacity_groups[s].items():
-                cap = capacity_data.get((s, group), 1e9)
-                lp_problem += pulp.lpSum(x[(s, bid)] for bid in bid_list) <= cap, f"GlobalCapacity_{s}_{group}"
-    else:
-        for s in suppliers:
-            for bid in items_dynamic:
-                cap = capacity_data.get((s, bid), 1e9)
-                lp_problem += x[(s, bid)] <= cap, f"PerItemCapacity_{s}_{bid}"
-    
-    for s in suppliers:
-        lp_problem += S0[s] == pulp.lpSum(price_data.get((s, bid), 0) * x[(s, bid)] for bid in items_dynamic), f"BaseSpend_{s}"
-        lp_problem += V[s] == pulp.lpSum(x[(s, bid)] for bid in items_dynamic), f"Volume_{s}"
-    
-    M = 1e9
-    small_value = 1e-3
-    
+    # Discount Tiers constraints.
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
-        M_discount = U_spend[s]
+        M_discount = U_spend[s] if s in U_spend else M
         for k, tier in enumerate(tiers):
             Dmin, Dmax, Dperc, scope_attr, scope_value = tier
             if scope_attr is None or scope_value is None:
-                vol_expr = pulp.lpSum(x[(s, bid)] for bid in items_dynamic)
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(x[(s, bid)] for bid in items_dynamic if item_attr_data[bid].get(scope_attr) == scope_value)
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[j].get(scope_attr) == scope_value)
             lp_problem += vol_expr >= Dmin * z_discount[s][k], f"DiscountTierMin_{s}_{k}"
             if Dmax < float('inf'):
-                lp_problem += vol_expr <= Dmax + M_discount * (1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
-            lp_problem += d[s] >= Dperc * S0[s] - M_discount * (1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
-            lp_problem += d[s] <= Dperc * S0[s] + M_discount * (1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
+                lp_problem += vol_expr <= Dmax + M_discount*(1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
+            lp_problem += d[s] >= Dperc * S0[s] - M_discount*(1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
+            lp_problem += d[s] <= Dperc * S0[s] + M_discount*(1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
     
     for s in suppliers:
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
     
+    # Rebate Tiers constraints.
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
-        M_rebate = U_spend[s]
+        M_rebate = U_spend[s] if s in U_spend else M
         for k, tier in enumerate(tiers):
             Rmin, Rmax, Rperc, scope_attr, scope_value = tier
             if scope_attr is None or scope_value is None:
-                vol_expr = pulp.lpSum(x[(s, bid)] for bid in items_dynamic)
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(x[(s, bid)] for bid in items_dynamic if item_attr_data[bid].get(scope_attr) == scope_value)
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[j].get(scope_attr) == scope_value)
             lp_problem += vol_expr >= Rmin * y_rebate[s][k], f"RebateTierMin_{s}_{k}"
             if Rmax < float('inf'):
-                lp_problem += vol_expr <= Rmax + M_rebate * (1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
-            lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate * (1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
-            lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate * (1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
+                lp_problem += vol_expr <= Rmax + M_rebate*(1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
+            lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate*(1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
+            lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate*(1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
     
+    # Compute lowest cost suppliers per bid.
+    lowest_cost_supplier = {}
+    second_lowest_cost_supplier = {}
+    for j in items_dynamic:
+        prices = []
+        for s in suppliers:
+            if (s, j) in price_data:
+                prices.append((price_data[(s, j)], s))
+        if prices:
+            prices.sort(key=lambda x: x[0])
+            lowest_cost_supplier[j] = prices[0][1]
+            second_lowest_cost_supplier[j] = prices[1][1] if len(prices) > 1 else prices[0][1]
+    
+    #############################################
     # CUSTOM RULES PROCESSING
+    #############################################
     for r_idx, rule in enumerate(rules):
+        # "# of suppliers" rule.
         if rule["rule_type"] == "# of suppliers":
             if rule["grouping"] == "Bid ID" and rule["operator"] == "Exactly" and rule["rule_input"] == "1":
                 if rule["grouping_scope"] == "Apply to all items individually":
                     bids = sorted(list(item_attr_data.keys()))
                 else:
                     bids = [rule["grouping_scope"]]
-                for bid in bids:
+                for j in bids:
                     w = {}
                     for s in suppliers:
-                        w[(s, bid)] = pulp.LpVariable(f"w_{r_idx}_{bid}_{s}", cat='Binary')
-                        lp_problem += x[(s, bid)] <= M * w[(s, bid)], f"RuleSupplierIndicator_{r_idx}_{bid}_{s}"
-                        lp_problem += x[(s, bid)] >= small_value * w[(s, bid)], f"RuleSupplierIndicatorLB_{r_idx}_{bid}_{s}"
-                    lp_problem += pulp.lpSum(w[(s, bid)] for s in suppliers) == 1, f"RuleSingleSupplier_{r_idx}_{bid}"
-                    if debug:
-                        print(f"DEBUG: Enforcing exactly one supplier for Bid {bid} via rule {r_idx}")
+                        w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{j}_{s}", cat='Binary')
+                        lp_problem += pulp.lpSum(x[(s, j)] for j in [j]) <= M * w[(s, j)], f"RuleSupplierIndicator_{r_idx}_{j}_{s}"
+                        lp_problem += pulp.lpSum(x[(s, j)] for j in [j]) >= 1e-3 * w[(s, j)], f"RuleSupplierIndicatorLB_{r_idx}_{j}_{s}"
+                    lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == 1, f"RuleSingleSupplier_{r_idx}_{j}"
             else:
-                if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
+                if rule["grouping"] == "All" or not rule["grouping_scope"]:
                     items_group = items_dynamic
-                elif rule["grouping_scope"] == "Apply to all items individually":
-                    if rule["grouping"] == "Bid ID":
-                        items_group = sorted(list(item_attr_data.keys()))
-                    else:
-                        items_group = sorted({str(item_attr_data[bid].get(rule["grouping"], "")).strip() 
-                                               for bid in item_attr_data if str(item_attr_data[bid].get(rule["grouping"], "")).strip() != ""})
+                elif rule["grouping"] == "Bid ID":
+                    items_group = [rule["grouping_scope"]]
                 else:
-                    items_group = [bid for bid in items_dynamic if str(item_attr_data[bid].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                    items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
                 try:
                     supplier_target = int(rule["rule_input"])
                 except:
@@ -285,8 +368,8 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 w = {}
                 for s in suppliers:
                     w[s] = pulp.LpVariable(f"w_{r_idx}_{s}", cat='Binary')
-                    lp_problem += pulp.lpSum(x[(s, bid)] for bid in items_group) <= M * w[s], f"SupplierIndicator_{r_idx}_{s}"
-                    lp_problem += pulp.lpSum(x[(s, bid)] for bid in items_group) >= small_value * w[s], f"SupplierIndicatorLB_{r_idx}_{s}"
+                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * w[s], f"SupplierIndicator_{r_idx}_{s}"
+                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= 1e-3 * w[s], f"SupplierIndicatorLB_{r_idx}_{s}"
                 total_suppliers = pulp.lpSum(w[s] for s in suppliers)
                 if operator == "At least":
                     lp_problem += total_suppliers >= supplier_target, f"Rule_{r_idx}"
@@ -294,6 +377,7 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                     lp_problem += total_suppliers <= supplier_target, f"Rule_{r_idx}"
                 elif operator == "Exactly":
                     lp_problem += total_suppliers == supplier_target, f"Rule_{r_idx}"
+        # "% of Volume Awarded" rule.
         elif rule["rule_type"] == "% of Volume Awarded":
             if rule["supplier_scope"] == "New Suppliers" and rule["grouping"] == "All":
                 try:
@@ -301,83 +385,97 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                 except:
                     continue
                 total_new_suppliers_vol = pulp.lpSum(
-                    pulp.lpSum(x[(s, bid)] for s in suppliers if s != item_attr_data[bid].get("Incumbent"))
-                    for bid in items_dynamic
+                    pulp.lpSum(x[(s, j)] for s in suppliers if s != item_attr_data[j].get("Incumbent"))
+                    for j in items_dynamic
                 )
-                lp_problem += total_new_suppliers_vol <= percentage * sum(demand_data[bid] for bid in items_dynamic), f"Rule_{r_idx}_AggregateNewSuppliers"
-                if debug:
-                    print(f"DEBUG: Enforcing aggregate new suppliers volume <= {percentage * sum(demand_data[bid] for bid in items_dynamic):.2f}")
+                lp_problem += total_new_suppliers_vol <= percentage * sum(demand_data[j] for j in items_dynamic), f"Rule_{r_idx}_AggregateNewSuppliers"
             else:
-                if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
+                if rule["grouping"] == "All" or not rule["grouping_scope"]:
                     items_group = items_dynamic
-                elif rule["grouping_scope"] == "Apply to all items individually":
-                    if rule["grouping"] == "Bid ID":
-                        items_group = sorted(list(item_attr_data.keys()))
-                    else:
-                        items_group = sorted({str(item_attr_data[bid].get(rule["grouping"], "")).strip() 
-                                               for bid in item_attr_data if str(item_attr_data[bid].get(rule["grouping"], "")).strip() != ""})
+                elif rule["grouping"] == "Bid ID":
+                    items_group = [rule["grouping_scope"]]
                 else:
-                    items_group = [bid for bid in items_dynamic if str(item_attr_data[bid].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                    items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
                 try:
                     percentage = float(rule["rule_input"]) / 100.0
                 except:
                     continue
                 operator = rule["operator"]
-                lhs = pulp.lpSum(x[(rule["supplier_scope"], bid)] for bid in items_group) if rule["supplier_scope"] else 0
-                total_vol = pulp.lpSum(x[(s, bid)] for s in suppliers for bid in items_group)
+                if rule["supplier_scope"] in ["Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]:
+                    if rule["supplier_scope"] == "Lowest cost supplier":
+                        lhs = pulp.lpSum(x[(lowest_cost_supplier[j], j)] for j in items_group)
+                    elif rule["supplier_scope"] == "Second Lowest Cost Supplier":
+                        lhs = pulp.lpSum(x[(second_lowest_cost_supplier[j], j)] for j in items_group)
+                    elif rule["supplier_scope"] == "Incumbent":
+                        lhs = pulp.lpSum(x[(item_attr_data[j].get("Incumbent"), j)] for j in items_group)
+                else:
+                    lhs = pulp.lpSum(x[(rule["supplier_scope"], j)] for j in items_group)
+                total_vol = pulp.lpSum(x[(s, j)] for s in suppliers for j in items_group)
                 if operator == "At least":
                     lp_problem += lhs >= percentage * total_vol, f"Rule_{r_idx}"
                 elif operator == "At most":
                     lp_problem += lhs <= percentage * total_vol, f"Rule_{r_idx}"
                 elif operator == "Exactly":
                     lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
+        # "# of Volume Awarded" rule.
+        elif rule["rule_type"] == "# of Volume Awarded":
+            if rule["grouping"] == "All" or not rule["grouping_scope"]:
+                items_group = items_dynamic
+            elif rule["grouping"] == "Bid ID":
+                items_group = [rule["grouping_scope"]]
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            try:
+                volume_target = float(rule["rule_input"])
+            except:
+                continue
+            operator = rule["operator"]
+            lhs = pulp.lpSum(x[(rule["supplier_scope"], j)] for j in items_group)
+            if operator == "At least":
+                lp_problem += lhs >= volume_target, f"Rule_{r_idx}"
+            elif operator == "At most":
+                lp_problem += lhs <= volume_target, f"Rule_{r_idx}"
+            elif operator == "Exactly":
+                lp_problem += lhs == volume_target, f"Rule_{r_idx}"
+        # "# of transitions" rule.
         elif rule["rule_type"] == "# of transitions":
-            if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
+            if rule["grouping"] == "All" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             elif rule["grouping_scope"] == "Apply to all items individually":
                 if rule["grouping"] == "Bid ID":
                     items_group = sorted(list(item_attr_data.keys()))
                 else:
-                    items_group = sorted({str(item_attr_data[bid].get(rule["grouping"], "")).strip() 
-                                           for bid in item_attr_data if str(item_attr_data[bid].get(rule["grouping"], "")).strip() != ""})
+                    items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                                           for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
             else:
-                items_group = [bid for bid in items_dynamic if str(item_attr_data[bid].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
             try:
                 transitions_target = int(rule["rule_input"])
             except:
                 continue
             operator = rule["operator"]
-            total_transitions = pulp.lpSum(T[(bid, s)] for (bid, s) in T if bid in items_group)
+            total_transitions = pulp.lpSum(T[(j, s)] for (j, s) in T if j in items_group)
             if operator == "At least":
                 lp_problem += total_transitions >= transitions_target, f"Rule_{r_idx}"
             elif operator == "At most":
                 lp_problem += total_transitions <= transitions_target, f"Rule_{r_idx}"
             elif operator == "Exactly":
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
-            if debug:
-                print(f"DEBUG: Enforcing total transitions {operator} {transitions_target} over items {items_group}")
+        # "Bid Exclusions" rule.
         elif rule["rule_type"] == "Bid Exclusions":
-            if rule["grouping"] == "All" or rule["grouping_scope"] in ["All", "Apply to all items individually"]:
+            if rule["grouping"] == "Bid ID":
+                items_group = [rule["grouping_scope"]]
+            elif rule["grouping"] == "All" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             else:
-                items_group = [bid for bid in items_dynamic if str(item_attr_data[bid].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
             bid_group = rule.get("bid_grouping", None)
             if bid_group is None:
                 continue
-            is_numeric = True
-            for bid in items_group:
+            is_numeric = is_bid_attribute_numeric(bid_group, supplier_bid_attr_dict)
+            for j in items_group:
                 for s in suppliers:
-                    val = supplier_bid_attributes.get((s, bid), {}).get(bid_group, None)
-                    if val is not None:
-                        try:
-                            float(val)
-                        except:
-                            is_numeric = False
-                        break
-                break
-            for bid in items_group:
-                for s in suppliers:
-                    bid_val = supplier_bid_attributes.get((s, bid), {}).get(bid_group, None)
+                    bid_val = supplier_bid_attr_dict.get((s, j), {}).get(bid_group, None)
                     if bid_val is None:
                         continue
                     exclude = False
@@ -398,20 +496,53 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
                         if bid_val.strip() == rule.get("bid_exclusion_value", "").strip():
                             exclude = True
                     if exclude:
-                        lp_problem += x[(s, bid)] == 0, f"BidExclusion_{r_idx}_{bid}_{s}"
-                        if debug:
-                            print(f"DEBUG: Excluding Bid {bid} for supplier {s} due to Bid Exclusions rule {r_idx} on {bid_group} with value {bid_val}")
+                        lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
+        # "Supplier Exclusion" rule.
+        elif rule["rule_type"] == "Supplier Exclusion":
+            if rule["grouping"] == "Bid ID":
+                items_group = [rule["grouping_scope"]]
+            elif rule["grouping"] == "All" or not rule["grouping_scope"]:
+                items_group = items_dynamic
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            for j in items_group:
+                lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+        # "# Minimum volume awarded" rule.
+        elif rule["rule_type"] == "# Minimum volume awarded":
+            if rule["grouping"] == "All" or not rule["grouping_scope"]:
+                items_group = items_dynamic
+            elif rule["grouping"] == "Bid ID":
+                items_group = [rule["grouping_scope"]]
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            for s in suppliers:
+                y = pulp.LpVariable(f"MinVol_{r_idx}_{s}", cat='Binary')
+                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * y, f"MinVol_UB_{r_idx}_{s}"
+                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= float(rule["rule_input"]) * y, f"MinVol_LB_{r_idx}_{s}"
+        # "% Minimum volume awarded" rule.
+        elif rule["rule_type"] == "% Minimum volume awarded":
+            if rule["grouping"] == "All" or not rule["grouping_scope"]:
+                items_group = items_dynamic
+            elif rule["grouping"] == "Bid ID":
+                items_group = [rule["grouping_scope"]]
+            else:
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            group_demand = sum(demand_data[j] for j in items_group)
+            for s in suppliers:
+                y = pulp.LpVariable(f"MinVolPct_{r_idx}_{s}", cat='Binary')
+                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * y, f"MinVolPct_UB_{r_idx}_{s}"
+                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= (float(rule["rule_input"]) / 100.0) * group_demand * y, f"MinVolPct_LB_{r_idx}_{s}"
     
-    if debug:
-        constraint_names = list(lp_problem.constraints.keys())
-        duplicates = set([n for n in constraint_names if constraint_names.count(n) > 1])
-        if duplicates:
-            print("DEBUG: Duplicate constraint names found:", duplicates)
-        else:
-            print("DEBUG: No duplicate constraint names.")
-        print("DEBUG: Total constraints added:", len(constraint_names))
+    # Debug output.
+    constraint_names = list(lp_problem.constraints.keys())
+    duplicates = set([n for n in constraint_names if constraint_names.count(n) > 1])
+    if duplicates:
+        print("DEBUG: Duplicate constraint names found:", duplicates)
+    print("DEBUG: Total constraints added:", len(constraint_names))
     
-    lp_problem.solve()
+    # Solve the model.
+    solver = pulp.PULP_CBC_CMD(msg=False, gapRel=0, gapAbs=0)
+    lp_problem.solve(solver)
     model_status = pulp.LpStatus[lp_problem.status]
     
     feasibility_notes = ""
@@ -419,24 +550,25 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
         feasibility_notes += "Model is infeasible. Likely causes include:\n"
         feasibility_notes += " - Insufficient supplier capacity relative to demand.\n"
         feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n"
-        for bid in items_dynamic:
-            if use_global:
-                group = item_attr_data[bid].get("Capacity Group", "Unknown")
-                total_cap = sum(capacity_data.get((s, group), 0) for s in suppliers)
-                feasibility_notes += f"Bid {bid}: demand = {demand_data[bid]}, capacity for group {group} = {total_cap}\n"
-            else:
-                total_cap = sum(capacity_data.get((s, bid), 0) for s in suppliers)
-                feasibility_notes += f"Bid {bid}: demand = {demand_data[bid]}, capacity = {total_cap}\n"
+        for j in items_dynamic:
+            cap_note = ""
+            for (s, cap_scope, scope_value), cap in capacity_data.items():
+                if cap_scope == "Bid ID" and scope_value == j:
+                    cap_note += f"Supplier {s} (Bid ID capacity): {cap}; "
+                elif cap_scope != "Bid ID" and str(item_attr_data[j].get(cap_scope, "")).strip() == str(scope_value).strip():
+                    cap_note += f"Supplier {s} ({cap_scope}={scope_value} capacity): {cap}; "
+            feasibility_notes += f"  Bid {j}: demand = {demand_data[j]}, capacities: {cap_note}\n"
         feasibility_notes += "Please review supplier capacities, demand, and custom rule constraints."
     else:
         feasibility_notes = "Model is optimal."
     
+    # Prepare results.
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    for bid in items_dynamic:
+    for idx, j in enumerate(items_dynamic, start=1):
         awarded_list = []
         for s in suppliers:
-            award_val = pulp.value(x[(s, bid)])
+            award_val = pulp.value(x[(s, j)])
             if award_val is None:
                 award_val = 0
             if award_val > 0:
@@ -446,102 +578,71 @@ def run_optimization(use_global, capacity_data, demand_data, item_attr_data, pri
         awarded_list.sort(key=lambda tup: (-tup[1], tup[0]))
         for i, (s, award_val) in enumerate(awarded_list):
             bid_split = letter_list[i] if i < len(letter_list) else f"Split{i+1}"
-            orig_price = price_data.get((s, bid), 0)
+            orig_price = price_data.get((s, j), 0)
             active_discount = 0
             for k, tier in enumerate(discount_tiers.get(s, [])):
                 if pulp.value(z_discount[s][k]) is not None and pulp.value(z_discount[s][k]) >= 0.5:
                     active_discount = tier[2]
                     break
-            discounted_price = orig_price * (1 - active_discount)
+            discount_pct = active_discount
+            discounted_price = orig_price * (1 - discount_pct)
             awarded_spend = discounted_price * award_val
-            base_price = baseline_price_data.get(bid, 0)
+            base_price = baseline_price_data[j]
             baseline_spend = base_price * award_val
             baseline_savings = baseline_spend - awarded_spend
-            if use_global:
-                group = item_attr_data[bid].get("Capacity Group", "Unknown")
-                awarded_capacity = capacity_data.get((s, group), 0)
-            else:
-                awarded_capacity = capacity_data.get((s, bid), 0)
             active_rebate = 0
             for k, tier in enumerate(rebate_tiers.get(s, [])):
                 if pulp.value(y_rebate[s][k]) is not None and pulp.value(y_rebate[s][k]) >= 0.5:
                     active_rebate = tier[2]
                     break
             rebate_savings = awarded_spend * active_rebate
-            facility_val = item_attr_data[bid].get("Facility", "")
+            facility_val = item_attr_data[j].get("Facility", "")
             row = {
-                "Bid ID": bid,
-                "Capacity Group": item_attr_data[bid].get("Capacity Group", "") if use_global else "",
+                "Bid ID": idx,
                 "Bid ID Split": bid_split,
                 "Facility": facility_val,
-                "Incumbent": item_attr_data[bid].get("Incumbent", ""),
+                "Incumbent": item_attr_data[j].get("Incumbent", ""),
                 "Baseline Price": base_price,
                 "Baseline Spend": baseline_spend,
                 "Awarded Supplier": s,
                 "Original Awarded Supplier Price": orig_price,
-                "Percentage Volume Discount": f"{active_discount*100:.0f}%",
+                "Percentage Volume Discount": f"{discount_pct*100:.0f}%" if discount_pct else "0%",
                 "Discounted Awarded Supplier Price": discounted_price,
                 "Awarded Supplier Spend": awarded_spend,
                 "Awarded Volume": award_val,
-                "Awarded Supplier Capacity": awarded_capacity,
                 "Baseline Savings": baseline_savings,
-                "Rebate %": f"{active_rebate*100:.0f}%",
+                "Rebate %": f"{active_rebate*100:.0f}%" if active_rebate else "0%",
                 "Rebate Savings": rebate_savings
             }
             excel_rows.append(row)
     
     df_results = pd.DataFrame(excel_rows)
-    if use_global:
-        cols = ["Bid ID", "Capacity Group", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
-                "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
-                "Discounted Awarded Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
-                "Awarded Supplier Capacity", "Baseline Savings", "Rebate %", "Rebate Savings"]
-    else:
-        cols = ["Bid ID", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
-                "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
-                "Discounted Awarded Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
-                "Awarded Supplier Capacity", "Baseline Savings", "Rebate %", "Rebate Savings"]
+    cols = ["Bid ID", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
+            "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
+            "Discounted Awarded Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
+            "Baseline Savings", "Rebate %", "Rebate Savings"]
     df_results = df_results[cols]
     
-    home_dir = os.path.expanduser("~")
-    downloads_folder = os.path.join(home_dir, "Downloads")
-    temp_lp_file = os.path.join(downloads_folder, "temp_model.lp")
+    df_feasibility = pd.DataFrame({"Feasibility Notes": [feasibility_notes]})
+    temp_lp_file = os.path.join(os.getcwd(), "temp_model.lp")
     lp_problem.writeLP(temp_lp_file)
     with open(temp_lp_file, "r") as f:
         lp_text = f.read()
     df_lp = pd.DataFrame({"LP Model": [lp_text]})
     
-    output_file = os.path.join(downloads_folder, "optimization_results.xlsx")
+    output_file = os.path.join(os.getcwd(), "optimization_results.xlsx")
+    capacity_df = pd.DataFrame([
+        {"Supplier Name": s, "Capacity Scope": cs, "Scope Value": sv, "Capacity": cap}
+        for (s, cs, sv), cap in capacity_data.items()
+    ])
+    
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df_results.to_excel(writer, sheet_name="Results", index=False)
-        pd.DataFrame({"Feasibility Notes": [feasibility_notes]}).to_excel(writer, sheet_name="Feasibility Notes", index=False)
+        df_feasibility.to_excel(writer, sheet_name="Feasibility Notes", index=False)
         df_lp.to_excel(writer, sheet_name="LP Model", index=False)
+        capacity_df.to_excel(writer, sheet_name="Capacity", index=False)
     
     return output_file, feasibility_notes, model_status
 
-#############################################
-# Helper: Generate human-readable rule description
-#############################################
-def rule_to_text(rule):
-    rt = rule["rule_type"]
-    op = rule["operator"]
-    inp = rule["rule_input"]
-    group = rule["grouping"]
-    group_scope = rule["grouping_scope"]
-    supp_scope = rule.get("supplier_scope", "All Suppliers")
-    if rt == "% of Volume Awarded":
-        return f"{op} {inp}% of volume is awarded to {supp_scope} in grouping '{group_scope}' ({group})."
-    elif rt == "# of Volume Awarded":
-        return f"{op} {inp} volume units are awarded to {supp_scope} in grouping '{group_scope}' ({group})."
-    elif rt == "# of transitions":
-        return f"{op} {inp} transitions are enforced in grouping '{group_scope}' ({group})."
-    elif rt == "# of suppliers":
-        return f"{op} {inp} unique suppliers are awarded in grouping '{group_scope}' ({group})."
-    elif rt == "Supplier Exclusion":
-        return f"Exclude supplier {supp_scope} from grouping '{group_scope}' ({group})."
-    elif rt == "Bid Exclusions":
-        bid_grp = rule.get("bid_grouping", "N/A")
-        bid_val = rule.get("bid_exclusion_value", "N/A")
-        return f"Exclude bids with {bid_grp} {op} {inp} (or value '{bid_val}')."
-    else:
-        return str(rule)
+if __name__ == "__main__":
+    print("Optimization module loaded. Please call run_optimization() from your Streamlit app.")
