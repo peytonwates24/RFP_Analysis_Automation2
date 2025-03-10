@@ -20,6 +20,7 @@ from modules.optimization import *
 import logging
 import uuid 
 
+#Push message
 # testxd
 # # Configure logging
 # logging.basicConfig(level=logging.INFO)
