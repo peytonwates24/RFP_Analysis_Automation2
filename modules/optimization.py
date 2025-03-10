@@ -139,38 +139,48 @@ def df_to_dict_supplier_bid_attributes(df):
 #############################################
 def rule_to_text(rule):
     """
-    Return a string representation of a custom rule.
+    Generate a human-readable description of the custom rule.
     """
+    # Retrieve grouping and supplier information.
+    grouping = rule.get("grouping", "all items")
+    grouping_scope = rule.get("grouping_scope", "all items")
+    supplier = rule.get("supplier_scope")
+    if supplier is None:
+        supplier = "All"
+    op = rule.get("operator", "").lower()
+    
+    # For rules that refer to a Bid ID grouping, ensure proper labeling.
+    if grouping.strip() == "Bid ID":
+        grouping_scope_str = str(grouping_scope).strip()
+        if not grouping_scope_str.lower().startswith("bid id"):
+            grouping_scope_str = "Bid ID " + grouping_scope_str
+    else:
+        grouping_scope_str = grouping_scope
+
     if rule["rule_type"] == "% of Volume Awarded":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"% Vol: {rule['operator']} {rule['rule_input']}% of {grouping_text} awarded to {rule['supplier_scope']}"
+        return f"For {grouping_scope_str}, {supplier} is {op} awarded {rule['rule_input']} of the total volume."
     elif rule["rule_type"] == "# of Volume Awarded":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"# Vol: {rule['operator']} {rule['rule_input']} units of {grouping_text} awarded to {rule['supplier_scope']}"
+        return f"For {grouping_scope_str}, {supplier} is {op} awarded {rule['rule_input']} units of volume."
     elif rule["rule_type"] == "# of transitions":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"# Transitions: {rule['operator']} {rule['rule_input']} transitions in {grouping_text}"
+        return f"For {grouping_scope_str}, the number of transitions must be {op} {rule['rule_input']}."
     elif rule["rule_type"] == "# of suppliers":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"# Suppliers: {rule['operator']} {rule['rule_input']} unique suppliers in {grouping_text}"
+        return f"For {grouping_scope_str}, the number of unique suppliers must be {op} {rule['rule_input']}."
     elif rule["rule_type"] == "Supplier Exclusion":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"Exclude {rule['supplier_scope']} from {grouping_text}"
-    elif rule["rule_type"] == "Bid Exclusions":
-        bid_grouping = rule.get("bid_grouping", "Not specified")
-        if is_bid_attribute_numeric(bid_grouping, {}):
-            return f"Bid Exclusions on {bid_grouping}: {rule['operator']} {rule['rule_input']}"
+        return f"Exclude {supplier} from {grouping_scope_str}."
+    elif rule["rule_type"] == "Exclude Bids":
+        bid_attr = rule.get("bid_grouping", "Unknown Attribute")
+        if rule.get("rule_input", ""):
+            return f"Exclude bids where {bid_attr} is {op} {rule['rule_input']}."
         else:
-            bid_exclusion_value = rule.get("bid_exclusion_value", "Not specified")
-            return f"Bid Exclusions on {bid_grouping}: exclude '{bid_exclusion_value}'"
+            exclusion_val = rule.get("bid_exclusion_value", "Unknown")
+            return f"Exclude bids where {bid_attr} equals '{exclusion_val}'."
     elif rule["rule_type"] == "# Minimum volume awarded":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"# Min Vol: at least {rule['rule_input']} units in {grouping_text}"
+        return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} units of volume."
     elif rule["rule_type"] == "% Minimum volume awarded":
-        grouping_text = "all items" if rule["grouping"] == "All" or not rule["grouping_scope"] else rule["grouping_scope"]
-        return f"% Min Vol: at least {rule['rule_input']}% in {grouping_text}"
+        return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} of the total volume."
     else:
         return str(rule)
+
 
 #############################################
 # Helper: Determine if a bid attribute is numeric.
