@@ -487,6 +487,7 @@ def main():
                         if errors:
                             for error in errors:
                                 st.error(error)
+                            st.stop()
                         else:
                             rule = {
                                 "rule_type": rule_type,
@@ -507,15 +508,18 @@ def main():
                     if st.button("Clear Rules", key="clear_rules_button"):
                         st.session_state.rules_list = []
                         st.success("All rules cleared.")
+
                 if "rules_list" in st.session_state and st.session_state.rules_list:
                     st.markdown("#### Current Rules")
                     for i, rule in enumerate(st.session_state.rules_list):
                         col_rule, col_del = st.columns([0.95, 0.05])
                         with col_rule:
-                            st.write(f"{i+1}. {rule_to_text(rule)}")
+                            # Wrap the text in a div with class 'rule-text' to control font size.
+                            st.markdown(f"<div class='rule-text'>{i+1}. {rule_to_text(rule)}</div>", unsafe_allow_html=True)
                         with col_del:
                             if st.button("X", key=f"delete_rule_{i}"):
                                 st.session_state.rules_list.pop(i)
+
 
 
             

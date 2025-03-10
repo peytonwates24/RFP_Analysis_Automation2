@@ -138,9 +138,6 @@ def df_to_dict_supplier_bid_attributes(df):
 # Helper for Custom Rule Text Representation
 #############################################
 def rule_to_text(rule):
-    """
-    Generate a human-readable description of the custom rule.
-    """
     # Retrieve grouping and supplier information.
     grouping = rule.get("grouping", "all items")
     grouping_scope = rule.get("grouping_scope", "all items")
@@ -149,7 +146,7 @@ def rule_to_text(rule):
         supplier = "All"
     op = rule.get("operator", "").lower()
     
-    # For rules that refer to a Bid ID grouping, ensure proper labeling.
+    # If grouping is "Bid ID", ensure we output "Bid ID <value>".
     if grouping.strip() == "Bid ID":
         grouping_scope_str = str(grouping_scope).strip()
         if not grouping_scope_str.lower().startswith("bid id"):
