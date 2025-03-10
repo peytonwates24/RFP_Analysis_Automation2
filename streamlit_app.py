@@ -464,44 +464,73 @@ def main():
                 col_add, col_clear = st.columns(2)
                 with col_add:
                     if st.button("Add Rule", key="add_rule_button"):
-                        rule = {
-                            "rule_type": rule_type,
-                            "operator": operator,
-                            "rule_input": rule_input,
-                            "grouping": grouping,
-                            "grouping_scope": grouping_scope,
-                            "supplier_scope": supplier_scope
-                        }
-                        if rule_type == "Exclude Bids":
-                            rule["bid_grouping"] = bid_grouping
-                            rule["bid_exclusion_value"] = bid_exclusion_value
-                        if "rules_list" not in st.session_state:
-                            st.session_state.rules_list = []
-                        st.session_state.rules_list.append(rule)
-                        st.success("Rule added.")
+                        errors = []
+                        # Validate percentage-based rule inputs.
+                        if rule_type in ["% of Volume Awarded", "% Minimum volume awarded"]:
+                            try:
+                                percent_val = float(rule_input.rstrip("%"))
+                                if percent_val < 0 or percent_val > 100:
+                                    errors.append("Percentage must be between 0 and 100.")
+                            except Exception:
+                                errors.append("Invalid percentage format for rule input. Please use a format like 50.00%.")
+                        # Validate numeric rule inputs.
+                        elif rule_type in ["# of Volume Awarded", "# of transitions", "# Minimum volume awarded"]:
+                            try:
+                                _ = float(rule_input)
+                            except Exception:
+                                errors.append("Please enter a valid numeric value for the rule input.")
+                        # Validate for "Exclude Bids" textual case.
+                        if rule_type == "Exclude Bids" and not is_bid_attribute_numeric(bid_grouping, df_to_dict_supplier_bid_attributes(supplier_bid_attr_df)):
+                            if not bid_exclusion_value:
+                                errors.append("Please select a Bid Exclusion Value.")
+
+                        if errors:
+                            for error in errors:
+                                st.error(error)
+                        else:
+                            rule = {
+                                "rule_type": rule_type,
+                                "operator": operator,
+                                "rule_input": rule_input,
+                                "grouping": grouping,
+                                "grouping_scope": grouping_scope,
+                                "supplier_scope": supplier_scope
+                            }
+                            if rule_type == "Exclude Bids":
+                                rule["bid_grouping"] = bid_grouping
+                                rule["bid_exclusion_value"] = bid_exclusion_value
+                            if "rules_list" not in st.session_state:
+                                st.session_state.rules_list = []
+                            st.session_state.rules_list.append(rule)
+                            st.success("Rule added.")
                 with col_clear:
                     if st.button("Clear Rules", key="clear_rules_button"):
                         st.session_state.rules_list = []
                         st.success("All rules cleared.")
-                
                 if "rules_list" in st.session_state and st.session_state.rules_list:
                     st.markdown("#### Current Rules")
-                    for i, r in enumerate(st.session_state.rules_list):
+                    for i, rule in enumerate(st.session_state.rules_list):
                         col_rule, col_del = st.columns([0.95, 0.05])
                         with col_rule:
-                            st.write(f"{i+1}. {rule_to_text(r)}")
+                            st.write(f"{i+1}. {rule_to_text(rule)}")
                         with col_del:
                             if st.button("X", key=f"delete_rule_{i}"):
                                 st.session_state.rules_list.pop(i)
-
 
 
             
             # End Custom Rules section.
             
             # Verify that all required sheets exist.
-            required_sheet_names = ["Item Attributes", "Price", "Demand", "Rebate Tiers", "Discount Tiers",
-                                    "Baseline Price", "Capacity", "Supplier Bid Attributes"]
+            required_sheet_names = [
+                "Item Attributes", "Price", "Demand", "Rebate Tiers", 
+                "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+            ]
+            missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
+            if missing_sheets:
+                st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Please upload an Excel file that contains all of these sheets.")
+                st.stop()  # Stop further execution until the error is corrected.
+
             if all(sheet in sheet_dfs for sheet in required_sheet_names):
                 try:
                     # Convert sheets to dictionaries.
