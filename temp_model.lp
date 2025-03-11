@@ -2,14 +2,12 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
-BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
+BaseSpend_A: S0_A - 20 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
  - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
 BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 80 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 53 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
 BaseSpend_C: S0_C - 55 x_C_1 - 75 x_C_10 - 75 x_C_2 - 60 x_C_3 - 19 x_C_4
  - 24 x_C_5 - 64 x_C_6 - 86 x_C_7 - 24 x_C_8 - 13 x_C_9 = 0
-BidExclusion_0_5_B: x_B_5 = 0
-BidExclusion_0_5_C: x_C_5 = 0
 Capacity_A_Bid_ID_1: x_A_1 <= 5000
 Capacity_A_Bid_ID_10: x_A_10 <= 3000
 Capacity_A_Bid_ID_2: x_A_2 <= 4000
@@ -105,6 +103,7 @@ RebateTierUpper_B_0: rebate_B + 5723000 y_rebate_B_0 <= 5723000
 RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 5723000 y_rebate_B_1 <= 5723000
 RebateTierUpper_C_0: rebate_C + 5044000 y_rebate_C_0 <= 5044000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 5044000 y_rebate_C_1 <= 5044000
+Rule_0_1: x_B_1 + x_C_1 >= 500
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0

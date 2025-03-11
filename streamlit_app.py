@@ -327,9 +327,11 @@ def main():
                             operator = "At least"
                             st.selectbox("Operator", options=["At least"], index=0, key="operator_select", disabled=True)
                         elif rule_type == "Exclude Bids":
-                            operator = st.selectbox("Operator", options=["Greater than", "Less than", "Equal To"], key="operator_select")
+                            # Do not render a global dropdown; instead, we’ll set it inside the rule branch.
+                            st.empty()
                         else:
                             operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"], key="operator_select")
+
 
                     # Rule Input field for non-"Exclude Bids" types.
                     if rule_type == "% of Volume Awarded":
@@ -392,33 +394,55 @@ def main():
 
                     # --- "Exclude Bids" Branch ---
                     if rule_type == "Exclude Bids":
-                        # Dynamically retrieve bid attribute columns from the "Supplier Bid Attributes" sheet.
+                        # Retrieve bid attribute columns from the Supplier Bid Attributes sheet.
                         supplier_bid_attr_df = sheet_dfs.get("Supplier Bid Attributes")
                         if supplier_bid_attr_df is not None:
                             bid_attr_columns = [col for col in supplier_bid_attr_df.columns if col not in ["Supplier Name", "Bid ID"]]
                         else:
                             bid_attr_columns = []
-                        bid_grouping = st.selectbox("Bid Grouping", options=bid_attr_columns, key="bid_grouping_select")
                         
-                        # Retrieve unique values from the selected bid_grouping column.
+                        # In one row, show "Bid Grouping" and "Operator" dropdowns to the right of Rule Type.
+                        col_bid, col_operator = st.columns([1,1])
+                        with col_bid:
+                            bid_grouping = st.selectbox("Bid Grouping", options=bid_attr_columns, key="bid_grouping_select")
+                        # Determine if the selected bid grouping is numeric.
+                        is_numeric = False
                         if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
-                            unique_values = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
-                        else:
-                            unique_values = []
+                            non_null = supplier_bid_attr_df[bid_grouping].dropna()
+                            if not non_null.empty:
+                                try:
+                                    float(non_null.iloc[0])
+                                    is_numeric = True
+                                except:
+                                    is_numeric = False
+
+                        with col_operator:
+                            # If numeric, allow full operator choices; if not, lock to "Equal To" (and disable editing).
+                            if is_numeric:
+                                operator = st.selectbox("Operator", options=["Greater than", "Less than", "Equal To"],
+                                                        key="operator_select_exclude_bids", disabled=False)
+                            else:
+                                operator = st.selectbox("Operator", options=["Equal To"],
+                                                        key="operator_select_exclude_bids", disabled=True)
                         
-                        # Determine if the selected Bid Grouping is numeric.
-                        if is_bid_attribute_numeric(bid_grouping, df_to_dict_supplier_bid_attributes(supplier_bid_attr_df)):
-                            # Numeric case: allow free number entry.
-                            rule_input = st.number_input("Rule Input (numeric threshold)", min_value=0.0, value=0.0, step=0.01, key="rule_input_bid_exclusion_numeric")
+                        # Now, depending on whether the grouping is numeric, show the appropriate rule input.
+                        if is_numeric:
+                            # For numeric case, show a numeric input and hide the bid exclusion value.
+                            rule_input = st.number_input("Rule Input (numeric threshold)", min_value=0.0, value=0.0, step=0.01,
+                                                        key="rule_input_bid_exclusion_numeric")
                             bid_exclusion_value = None
-                            # Global operator remains as selected (from "Greater than", "Less than", "Equal To").
                         else:
-                            # Textual case: hide the numeric rule input.
+                            # For textual case, no numeric input is needed.
                             rule_input = ""
-                            # Lock the operator to "Equal To" by overriding the global operator.
-                            operator = "Equal To"
-                            st.markdown("**Operator locked to Equal To for textual Bid Grouping.**")
-                            bid_exclusion_value = st.selectbox("Bid Exclusion Value", options=unique_values, key="bid_exclusion_value_select")
+                            # Show the Bid Exclusion Value dropdown.
+                            if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
+                                unique_values = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
+                            else:
+                                unique_values = []
+                            bid_exclusion_value = st.selectbox("Bid Exclusion Value", options=unique_values,
+                                                                key="bid_exclusion_value_select")
+
+
 
                 
                 # Build grouping options from the "Item Attributes" sheet.
@@ -445,8 +469,24 @@ def main():
                     else:
                         grouping_scope = "All"
                 
+                # # Supplier Scope handling.
+                # if rule_type in ["# of transitions", "# of suppliers", "% Minimum volume awarded", "# Minimum volume awarded"]:
+                #     # Disable Supplier Scope for these rule types.
+                #     supplier_scope = "All"
+                #     st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
+                # else:
+                #     if "Price" in sheet_dfs:
+                #         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                #     else:
+                #         suppliers_auto = []
+                #     default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                #     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
+                #     if supplier_scope == "All":
+                #         supplier_scope = None
+
                 # Supplier Scope handling.
-                if rule_type == "# of suppliers":
+                if rule_type in ["# of transitions", "# of suppliers"]:
+                    # Disable Supplier Scope for these rule types.
                     supplier_scope = "All"
                     st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
                 else:
@@ -454,12 +494,15 @@ def main():
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                     else:
                         suppliers_auto = []
-                    if suppliers_auto:
-                        supplier_scope = st.selectbox("Supplier Scope", options=["All"] + suppliers_auto, key="supplier_scope_select")
-                        if supplier_scope == "All":
-                            supplier_scope = None
-                    else:
-                        supplier_scope = st.text_input("Supplier Scope (or leave blank)", value="", key="supplier_scope_input")
+                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    # Use only the drop-down – do not add an extra text input.
+                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
+                    if supplier_scope.lower() == "all":
+                        supplier_scope = None
+
+
+
+
                 
                 col_add, col_clear = st.columns(2)
                 with col_add:
