@@ -115,6 +115,9 @@ def main():
         st.session_state.selected_subfolder = None
     if 'customizable_grouping_column' not in st.session_state:
         st.session_state.customizable_grouping_column = None
+    if "rules_list" not in st.session_state:
+        st.session_state.rules_list = []
+
 
 
     # Header with logo and page title
@@ -470,10 +473,10 @@ def main():
                         grouping_scope = "All"
                 
                 # Supplier Scope handling.
-                if rule_type in ["# of transitions", "# of suppliers", "% Minimum volume awarded", "# Minimum volume awarded"]:
-                    # Disable Supplier Scope for these rule types.
-                    supplier_scope = "All"
-                    st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
+                # For these rule types, we disable Supplier Scope.
+                if rule_type in ["# of transitions", "# of suppliers", "% Minimum volume awarded", "# Minimum volume awarded", "Exclude Bids"]:
+                    # For "Exclude Bids", we do not need a supplier scope.
+                    supplier_scope = None
                 else:
                     if "Price" in sheet_dfs:
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
@@ -483,6 +486,7 @@ def main():
                     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
                     if supplier_scope == "All":
                         supplier_scope = None
+
 
 
                 
@@ -534,16 +538,22 @@ def main():
                         st.session_state.rules_list = []
                         st.success("All rules cleared.")
 
+                # When displaying the current rules:
+                # Assuming you have already set:
+                temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+
                 if "rules_list" in st.session_state and st.session_state.rules_list:
                     st.markdown("#### Current Rules")
                     for i, rule in enumerate(st.session_state.rules_list):
                         col_rule, col_del = st.columns([0.95, 0.05])
                         with col_rule:
-                            # Wrap the text in a div with class 'rule-text' to control font size.
-                            st.markdown(f"<div class='rule-text'>{i+1}. {rule_to_text(rule)}</div>", unsafe_allow_html=True)
+                            # Use <br> in the expanded text so each rule appears on a new line.
+                            st.markdown(f"<div class='rule-text'>{expand_rule_text(rule, temp_item_attr)}</div>", unsafe_allow_html=True)
                         with col_del:
                             if st.button("X", key=f"delete_rule_{i}"):
                                 st.session_state.rules_list.pop(i)
+
+
 
 
 
@@ -571,6 +581,7 @@ def main():
                     rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
                     discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
                     supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                    
                     
                     # Auto-detect suppliers from the Price sheet.
                     suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()

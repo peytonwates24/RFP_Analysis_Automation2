@@ -137,6 +137,7 @@ def df_to_dict_supplier_bid_attributes(df):
 #############################################
 # Helper for Custom Rule Text Representation
 #############################################
+# Define rule_to_text first (or import it)
 def rule_to_text(rule):
     # Retrieve grouping and supplier information.
     grouping = rule.get("grouping", "all items")
@@ -145,7 +146,7 @@ def rule_to_text(rule):
     if supplier is None:
         supplier = "All"
     op = rule.get("operator", "").lower()
-    
+
     # If grouping is "Bid ID", ensure we output "Bid ID <value>".
     if grouping.strip() == "Bid ID":
         grouping_scope_str = str(grouping_scope).strip()
@@ -177,6 +178,40 @@ def rule_to_text(rule):
         return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} of the total volume."
     else:
         return str(rule)
+
+
+def expand_rule_text(rule, item_attr_dict):
+    """
+    If the rule's grouping scope is set to "Apply to all items individually" (case-insensitive),
+    this function will generate one numbered rule text per unique grouping value (based on item_attr_dict)
+    and join them with HTML <br> tags so each appears on its own line.
+    Otherwise, it simply returns rule_to_text(rule).
+    """
+    grouping_scope = rule.get("grouping_scope", "").strip().lower()
+    if grouping_scope != "apply to all items individually":
+        # Not in "apply to all" mode—just return the standard text.
+        return rule_to_text(rule)
+
+    # Determine the unique values for the grouping field.
+    grouping = rule.get("grouping", "all items").strip()
+    unique_values = []
+    if grouping.lower() == "bid id":
+        # For Bid ID, the keys of the item attribute dictionary are the unique bids.
+        unique_values = sorted(item_attr_dict.keys())
+    else:
+        # For other groupings, extract unique non-empty values.
+        unique_values = sorted({str(item_attr_dict[bid].get(grouping, "")).strip()
+                                for bid in item_attr_dict
+                                if str(item_attr_dict[bid].get(grouping, "")).strip() != ""})
+    # Build an expanded text with one numbered line per unique value.
+    texts = []
+    for idx, val in enumerate(unique_values, start=1):
+        # Create a copy of the rule with the grouping_scope replaced by the current value.
+        rule_copy = rule.copy()
+        rule_copy["grouping_scope"] = val
+        texts.append(f"{idx}. {rule_to_text(rule_copy)}")
+    # Join with <br> so each line displays separately.
+    return "<br>".join(texts)
 
 
 #############################################
@@ -394,13 +429,14 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             except Exception as e:
                 continue
 
-            # When grouping is by Bid ID, add constraints per bid.
             if rule["grouping"].strip() == "Bid ID":
-                # If grouping_scope is "All", apply to all bids; otherwise, apply to the specific bid.
                 if rule["grouping_scope"].strip().lower() == "all":
                     items_group = items_dynamic
+                elif rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                    items_group = sorted(list(item_attr_data.keys()))
                 else:
                     items_group = [rule["grouping_scope"].strip()]
+
 
                 for j in items_group:
                     total_vol = pulp.lpSum(x[(s, j)] for s in suppliers)
