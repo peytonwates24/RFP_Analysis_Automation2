@@ -510,7 +510,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             if rule["grouping"] == "All" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             elif rule["grouping"] == "Bid ID":
-                items_group = [rule["grouping_scope"]]
+                # Special handling: if grouping_scope is "Apply to all items individually", use all bids.
+                if rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                    items_group = items_dynamic
+                else:
+                    items_group = [rule["grouping_scope"]]
             else:
                 items_group = [j for j in items_dynamic 
                             if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
@@ -533,7 +537,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             lp_problem += x[(s, j)] <= volume_target, f"Rule_{r_idx}_{s}_{j}"
                         elif operator == "at least":
                             lp_problem += x[(s, j)] >= volume_target, f"Rule_{r_idx}_{s}_{j}"
-
             # Check for New Suppliers
             elif supplier_scope_value.lower() == "new suppliers":
                 for j in items_group:
@@ -587,6 +590,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += lhs <= volume_target, f"Rule_{r_idx}_{j}"
                     elif operator == "at least":
                         lp_problem += lhs >= volume_target, f"Rule_{r_idx}_{j}"
+
 
 
         # "# of transitions" rule.

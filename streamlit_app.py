@@ -476,19 +476,25 @@ def main():
                         grouping_scope = "All"
                 
                 # Supplier Scope handling.
-                # For these rule types, we disable Supplier Scope.
-                if rule_type in ["# of transitions", "# of suppliers", "% Minimum volume awarded", "# Minimum volume awarded", "Exclude Bids"]:
-                    # For "Exclude Bids", we do not need a supplier scope.
-                    supplier_scope = None
+                # For rule types that should not allow a custom supplier selection, we disable the dropdown.
+                if rule_type in [
+                    "# of Transitions", "# of Suppliers", "% Minimum Volume Awarded", "# Minimum Volume Awarded",
+                    "Exclude Bids", "Supplier Exclusion"
+                ]:
+                    supplier_scope = "All"
+                    st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
                 else:
                     if "Price" in sheet_dfs:
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                     else:
                         suppliers_auto = []
-                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    default_supplier_scope_options = ["All"] + suppliers_auto + [
+                        "New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"
+                    ]
                     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
                     if supplier_scope == "All":
                         supplier_scope = None
+
 
 
 
