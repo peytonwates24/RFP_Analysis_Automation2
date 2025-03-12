@@ -309,34 +309,47 @@ def main():
             # Use an expander for the Custom Rules UI.
             with st.expander("Custom Rules", expanded=True):
                 st.markdown("### Custom Rules")
-                col_rt, col_op = st.columns(2)
-                with col_rt:
-                    # Global rule type selection (make sure "Exclude Bids")
-                    rule_type = st.selectbox(
-                        "Rule Type", 
-                        options=[
-                            "% of Volume Awarded", "# of Volume Awarded", "# of transitions", "# of suppliers", 
-                            "Supplier Exclusion", "Exclude Bids", "% Minimum volume awarded", "# Minimum volume awarded"
-                        ],
-                        key="rule_type_select"
-                    )
-
-                    # Global operator selection block
-                    with col_op:
-                        if rule_type == "Supplier Exclusion":
-                            operator = "Exactly"
-                            st.selectbox("Operator", options=["Exactly"], index=0, key="operator_select", disabled=True)
-                        elif rule_type in ["% Minimum volume awarded", "# Minimum volume awarded"]:
-                            operator = "At least"
-                            st.selectbox("Operator", options=["At least"], index=0, key="operator_select", disabled=True)
-                        elif rule_type == "Exclude Bids":
-                            # Do not render a global dropdown; instead, we’ll set it inside the rule branch.
-                            st.empty()
-                        else:
-                            operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"], key="operator_select")
-
-
-                    # Rule Input field for non-"Exclude Bids" types.
+                
+                # Define your rule descriptions dictionary.
+                rule_descriptions = {
+                    "% of Volume Awarded": "This rule uses the selected operator (e.g., 'At least', 'At most', 'Exactly') along with the rule input (e.g., '50%') to ensure that the specified supplier receives that percentage of the total volume for the defined grouping.",
+                    "# of Volume Awarded": "This rule applies an operator to the rule input (a specific number of units) to control the exact, minimum, or maximum volume awarded to a supplier within the chosen grouping.",
+                    "# of Transitions": "This rule uses the operator and rule input (a numeric value) to limit the total number of supplier transitions across the bids in a grouping.",
+                    "# of Suppliers": "This rule enforces that the number of unique suppliers awarded within a grouping meets the target defined by the rule input, using the specified operator.",
+                    "Supplier Exclusion": "This rule excludes a specified supplier from the grouping; no operator or rule input is needed since that supplier is entirely removed.",
+                    "Exclude Bids": "This rule removes bids from consideration when a specific bid attribute meets the condition defined by the operator and rule input (or a fixed exclusion value for textual attributes).",
+                    "# Minimum Volume Awarded": "This rule mandates that a supplier must be awarded at least the number of volume units specified in the rule input. (Operator is implicitly 'At least'.)",
+                    "% Minimum Volume Awarded": "This rule requires that a supplier is awarded at least the percentage of the total volume specified by the rule input, with the operator set to 'At least'."
+                }
+                
+                # Rule Type selectbox.
+                rule_type = st.selectbox(
+                    "Rule Type", 
+                    options=[
+                        "% of Volume Awarded", "# of Volume Awarded", "# of Transitions", "# of Suppliers", 
+                        "Supplier Exclusion", "Exclude Bids", "% Minimum Volume Awarded", "# Minimum Volume Awarded"
+                    ],
+                    key="rule_type_select"
+                )
+                
+                # Display the description for the selected rule type (only once).
+                st.markdown(f"<small>*{rule_descriptions[rule_type]}*</small>", unsafe_allow_html=True)
+                
+                # Place Operator and Rule Input side by side.
+                col_operator, col_rule_input = st.columns(2)
+                with col_operator:
+                    if rule_type == "Supplier Exclusion":
+                        operator = "Exactly"
+                        st.selectbox("Operator", options=["Exactly"], key="operator_select", disabled=True)
+                    elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
+                        operator = "At least"
+                        st.selectbox("Operator", options=["At least"], key="operator_select", disabled=True)
+                    elif rule_type == "Exclude Bids":
+                        st.empty()  # Global operator is not used for Exclude Bids.
+                    else:
+                        operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"], key="operator_select")
+                
+                with col_rule_input:
                     if rule_type == "% of Volume Awarded":
                         rule_input_value = st.number_input(
                             "Rule Input (as percentage)",
@@ -357,7 +370,7 @@ def main():
                             key="rule_input_volume"
                         )
                         rule_input = str(rule_input_value)
-                    elif rule_type == "# of transitions":
+                    elif rule_type == "# of Transitions":
                         rule_input_value = st.number_input(
                             "Rule Input (number of transitions)",
                             min_value=0,
@@ -366,8 +379,7 @@ def main():
                             key="rule_input_transitions"
                         )
                         rule_input = str(rule_input_value)
-                    elif rule_type == "% Minimum volume awarded":
-                        # Mandatory percentage input for minimum volume rule.
+                    elif rule_type == "% Minimum Volume Awarded":
                         rule_input_value = st.number_input(
                             "Rule Input (as percentage)",
                             min_value=0.0,
@@ -378,8 +390,7 @@ def main():
                             key="rule_input_min_pct"
                         )
                         rule_input = f"{rule_input_value:.2f}%"
-                    elif rule_type == "# Minimum volume awarded":
-                        # Mandatory numeric input for minimum volume (number of units).
+                    elif rule_type == "# Minimum Volume Awarded":
                         rule_input_value = st.number_input(
                             "Rule Input (number of units)",
                             min_value=0,
@@ -393,57 +404,49 @@ def main():
                         st.text_input("Rule Input", value="", key="rule_input_field", disabled=True)
                     elif rule_type != "Exclude Bids":
                         rule_input = st.text_input("Rule Input", key="rule_input_field")
+                
+                # (Handle the "Exclude Bids" branch here if needed, as before.)
 
-
-                    # --- "Exclude Bids" Branch ---
-                    if rule_type == "Exclude Bids":
-                        # Retrieve bid attribute columns from the Supplier Bid Attributes sheet.
-                        supplier_bid_attr_df = sheet_dfs.get("Supplier Bid Attributes")
-                        if supplier_bid_attr_df is not None:
-                            bid_attr_columns = [col for col in supplier_bid_attr_df.columns if col not in ["Supplier Name", "Bid ID"]]
-                        else:
-                            bid_attr_columns = []
-                        
-                        # In one row, show "Bid Grouping" and "Operator" dropdowns to the right of Rule Type.
-                        col_bid, col_operator = st.columns([1,1])
-                        with col_bid:
-                            bid_grouping = st.selectbox("Bid Grouping", options=bid_attr_columns, key="bid_grouping_select")
-                        # Determine if the selected bid grouping is numeric.
-                        is_numeric = False
-                        if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
-                            non_null = supplier_bid_attr_df[bid_grouping].dropna()
-                            if not non_null.empty:
-                                try:
-                                    float(non_null.iloc[0])
-                                    is_numeric = True
-                                except:
-                                    is_numeric = False
-
-                        with col_operator:
-                            # If numeric, allow full operator choices; if not, lock to "Equal To" (and disable editing).
-                            if is_numeric:
-                                operator = st.selectbox("Operator", options=["Greater than", "Less than", "Equal To"],
-                                                        key="operator_select_exclude_bids", disabled=False)
-                            else:
-                                operator = st.selectbox("Operator", options=["Equal To"],
-                                                        key="operator_select_exclude_bids", disabled=True)
-                        
-                        # Now, depending on whether the grouping is numeric, show the appropriate rule input.
+                
+                # If the rule type is "Exclude Bids", you can handle its unique UI below (separately)
+                if rule_type == "Exclude Bids":
+                    supplier_bid_attr_df = sheet_dfs.get("Supplier Bid Attributes")
+                    if supplier_bid_attr_df is not None:
+                        bid_attr_columns = [col for col in supplier_bid_attr_df.columns if col not in ["Supplier Name", "Bid ID"]]
+                    else:
+                        bid_attr_columns = []
+                    
+                    col_bid, col_operator_exclude = st.columns([1, 1])
+                    with col_bid:
+                        bid_grouping = st.selectbox("Bid Grouping", options=bid_attr_columns, key="bid_grouping_select")
+                    is_numeric = False
+                    if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
+                        non_null = supplier_bid_attr_df[bid_grouping].dropna()
+                        if not non_null.empty:
+                            try:
+                                float(non_null.iloc[0])
+                                is_numeric = True
+                            except:
+                                is_numeric = False
+                    with col_operator_exclude:
                         if is_numeric:
-                            # For numeric case, show a numeric input and hide the bid exclusion value.
-                            rule_input = st.number_input("Rule Input (numeric threshold)", min_value=0.0, value=0.0, step=0.01,
-                                                        key="rule_input_bid_exclusion_numeric")
-                            bid_exclusion_value = None
+                            operator = st.selectbox("Operator", options=["Greater than", "Less than", "Equal To"],
+                                                    key="operator_select_exclude_bids", disabled=False)
                         else:
-                            # For textual case, no numeric input is needed.
-                            rule_input = ""
-                            # Show the Bid Exclusion Value dropdown.
-                            if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
-                                unique_values = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
-                            else:
-                                unique_values = []
-                            bid_exclusion_value = st.selectbox("Bid Exclusion Value", options=unique_values,
-                                                                key="bid_exclusion_value_select")
+                            operator = st.selectbox("Operator", options=["Equal To"],
+                                                    key="operator_select_exclude_bids", disabled=True)
+                    if is_numeric:
+                        rule_input = st.number_input("Rule Input (numeric threshold)", min_value=0.0, value=0.0, step=0.01,
+                                                    key="rule_input_bid_exclusion_numeric")
+                        bid_exclusion_value = None
+                    else:
+                        rule_input = ""
+                        if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
+                            unique_values = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
+                        else:
+                            unique_values = []
+                        bid_exclusion_value = st.selectbox("Bid Exclusion Value", options=unique_values,
+                                                        key="bid_exclusion_value_select")
 
 
 
