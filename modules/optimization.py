@@ -159,9 +159,9 @@ def rule_to_text(rule):
         return f"For {grouping_scope_str}, {supplier} is {op} awarded {rule['rule_input']} of the total volume."
     elif rule["rule_type"] == "# of Volume Awarded":
         return f"For {grouping_scope_str}, {supplier} is {op} awarded {rule['rule_input']} units of volume."
-    elif rule["rule_type"] == "# of transitions":
+    elif rule["rule_type"] == "# of Transitions":
         return f"For {grouping_scope_str}, the number of transitions must be {op} {rule['rule_input']}."
-    elif rule["rule_type"] == "# of suppliers":
+    elif rule["rule_type"] == "# of Suppliers":
         return f"For {grouping_scope_str}, the number of unique suppliers must be {op} {rule['rule_input']}."
     elif rule["rule_type"] == "Supplier Exclusion":
         return f"Exclude {supplier} from {grouping_scope_str}."
@@ -172,47 +172,44 @@ def rule_to_text(rule):
         else:
             exclusion_val = rule.get("bid_exclusion_value", "Unknown")
             return f"Exclude bids where {bid_attr} equals '{exclusion_val}'."
-    elif rule["rule_type"] == "# Minimum volume awarded":
+    elif rule["rule_type"] == "# Minimum Volume Awarded":
         return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} units of volume."
-    elif rule["rule_type"] == "% Minimum volume awarded":
+    elif rule["rule_type"] == "% Minimum Volume Awarded":
         return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} of the total volume."
     else:
         return str(rule)
 
 
-def expand_rule_text(rule, item_attr_dict):
+def expand_rule_text(rule, item_attr_data):
     """
-    If the rule's grouping scope is set to "Apply to all items individually" (case-insensitive),
-    this function will generate one numbered rule text per unique grouping value (based on item_attr_dict)
-    and join them with HTML <br> tags so each appears on its own line.
-    Otherwise, it simply returns rule_to_text(rule).
+    If the grouping scope is set to "Apply to all items individually",
+    this function expands the rule text for each unique grouping value.
+    Otherwise, it just returns the standard rule text.
     """
+    grouping = rule.get("grouping", "All")
     grouping_scope = rule.get("grouping_scope", "").strip().lower()
-    if grouping_scope != "apply to all items individually":
-        # Not in "apply to all" mode—just return the standard text.
-        return rule_to_text(rule)
-
-    # Determine the unique values for the grouping field.
-    grouping = rule.get("grouping", "all items").strip()
-    unique_values = []
-    if grouping.lower() == "bid id":
-        # For Bid ID, the keys of the item attribute dictionary are the unique bids.
-        unique_values = sorted(item_attr_dict.keys())
+    if grouping_scope == "apply to all items individually":
+        # If grouping is Bid ID, use all Bid IDs;
+        # otherwise, gather unique grouping values from the item attributes.
+        if grouping == "Bid ID":
+            groups = sorted(item_attr_data.keys())
+        else:
+            groups = sorted(
+                set(
+                    str(item_attr_data[j].get(grouping, "")).strip()
+                    for j in item_attr_data
+                    if str(item_attr_data[j].get(grouping, "")).strip() != ""
+                )
+            )
+        texts = []
+        for i, group in enumerate(groups):
+            new_rule = rule.copy()
+            new_rule["grouping_scope"] = group
+            texts.append(f"{i+1}. {rule_to_text(new_rule)}")
+        # Return each expanded rule on its own line using a HTML line break.
+        return "<br>".join(texts)
     else:
-        # For other groupings, extract unique non-empty values.
-        unique_values = sorted({str(item_attr_dict[bid].get(grouping, "")).strip()
-                                for bid in item_attr_dict
-                                if str(item_attr_dict[bid].get(grouping, "")).strip() != ""})
-    # Build an expanded text with one numbered line per unique value.
-    texts = []
-    for idx, val in enumerate(unique_values, start=1):
-        # Create a copy of the rule with the grouping_scope replaced by the current value.
-        rule_copy = rule.copy()
-        rule_copy["grouping_scope"] = val
-        texts.append(f"{idx}. {rule_to_text(rule_copy)}")
-    # Join with <br> so each line displays separately.
-    return "<br>".join(texts)
-
+        return rule_to_text(rule)
 
 #############################################
 # Helper: Determine if a bid attribute is numeric.
