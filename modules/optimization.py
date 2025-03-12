@@ -381,43 +381,73 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     #############################################
     for r_idx, rule in enumerate(rules):
         # "# of suppliers" rule.
-        if rule["rule_type"] == "# of suppliers":
-            if rule["grouping"] == "Bid ID" and rule["operator"] == "Exactly" and rule["rule_input"] == "1":
-                if rule["grouping_scope"] == "Apply to all items individually":
-                    bids = sorted(list(item_attr_data.keys()))
+        # "# of Suppliers" rule.
+        if rule["rule_type"].lower() == "# of suppliers":
+            try:
+                supplier_target = int(rule["rule_input"])
+            except Exception:
+                continue
+            operator = rule["operator"].lower()
+            # Determine the set of items (groupings) to which this rule applies.
+            # (For # of Suppliers, the supplier scope is ignored.)
+            if rule["grouping"].strip().lower() == "all" or not rule["grouping_scope"]:
+                items_group = items_dynamic
+            elif rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                # For each unique grouping value (e.g. each Bid ID or other grouping),
+                # process them one at a time.
+                if rule["grouping"].strip().lower() == "bid id":
+                    unique_groups = sorted(list(item_attr_data.keys()))
                 else:
-                    bids = [rule["grouping_scope"]]
-                for j in bids:
-                    w = {}
-                    for s in suppliers:
-                        w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{j}_{s}", cat='Binary')
-                        lp_problem += pulp.lpSum(x[(s, j)] for j in [j]) <= M * w[(s, j)], f"RuleSupplierIndicator_{r_idx}_{j}_{s}"
-                        lp_problem += pulp.lpSum(x[(s, j)] for j in [j]) >= 1e-3 * w[(s, j)], f"RuleSupplierIndicatorLB_{r_idx}_{j}_{s}"
-                    lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == 1, f"RuleSingleSupplier_{r_idx}_{j}"
+                    unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() 
+                                              for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip()})
+                # Process each unique grouping value separately.
+                for group_val in unique_groups:
+                    if rule["grouping"].strip().lower() == "bid id":
+                        subgroup = [group_val]
+                    else:
+                        subgroup = [j for j in items_dynamic 
+                                    if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                    for j in subgroup:
+                        # Create binary indicator variables for each supplier for item j.
+                        w = {}
+                        for s in suppliers:
+                            w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{s}_{j}", cat='Binary')
+                            # epsilon: the minimum volume to count as "active" (set to 1 unit here).
+                            epsilon = 1  
+                            lp_problem += x[(s, j)] <= M * w[(s, j)], f"SupplIndicator_{r_idx}_{s}_{j}"
+                            lp_problem += x[(s, j)] >= epsilon * w[(s, j)], f"SupplIndicatorLB_{r_idx}_{s}_{j}"
+                        if operator == "at least":
+                            lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) >= supplier_target, f"SupplierCount_{r_idx}_{j}"
+                        elif operator == "at most":
+                            lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) <= supplier_target, f"SupplierCount_{r_idx}_{j}"
+                        elif operator == "exactly":
+                            lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == supplier_target, f"SupplierCount_{r_idx}_{j}"
+                # After processing each unique group, continue to the next rule.
+                continue
             else:
-                if rule["grouping"] == "All" or not rule["grouping_scope"]:
-                    items_group = items_dynamic
-                elif rule["grouping"] == "Bid ID":
-                    items_group = [rule["grouping_scope"]]
+                # Grouping scope is a specific value.
+                if rule["grouping"].strip().lower() == "bid id":
+                    items_group = [rule["grouping_scope"].strip()]
                 else:
-                    items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-                try:
-                    supplier_target = int(rule["rule_input"])
-                except:
-                    continue
-                operator = rule["operator"]
+                    items_group = [j for j in items_dynamic 
+                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+            # For each item in the specified group, create and add constraints.
+            for j in items_group:
                 w = {}
                 for s in suppliers:
-                    w[s] = pulp.LpVariable(f"w_{r_idx}_{s}", cat='Binary')
-                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * w[s], f"SupplierIndicator_{r_idx}_{s}"
-                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= 1e-3 * w[s], f"SupplierIndicatorLB_{r_idx}_{s}"
-                total_suppliers = pulp.lpSum(w[s] for s in suppliers)
-                if operator == "At least":
-                    lp_problem += total_suppliers >= supplier_target, f"Rule_{r_idx}"
-                elif operator == "At most":
-                    lp_problem += total_suppliers <= supplier_target, f"Rule_{r_idx}"
-                elif operator == "Exactly":
-                    lp_problem += total_suppliers == supplier_target, f"Rule_{r_idx}"
+                    w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{s}_{j}", cat='Binary')
+                    epsilon = 1
+                    lp_problem += x[(s, j)] <= M * w[(s, j)], f"SupplIndicator_{r_idx}_{s}_{j}"
+                    lp_problem += x[(s, j)] >= epsilon * w[(s, j)], f"SupplIndicatorLB_{r_idx}_{s}_{j}"
+                if operator == "at least":
+                    lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) >= supplier_target, f"SupplierCount_{r_idx}_{j}"
+                elif operator == "at most":
+                    lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) <= supplier_target, f"SupplierCount_{r_idx}_{j}"
+                elif operator == "exactly":
+                    lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == supplier_target, f"SupplierCount_{r_idx}_{j}"
+
+
+
         # "% of Volume Awarded" rule.
         elif rule["rule_type"] == "% of Volume Awarded":
             try:
