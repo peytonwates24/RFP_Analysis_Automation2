@@ -652,14 +652,77 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
         # "Supplier Exclusion" rule.
         elif rule["rule_type"] == "Supplier Exclusion":
-            if rule["grouping"] == "Bid ID":
-                items_group = [rule["grouping_scope"]]
-            elif rule["grouping"] == "All" or not rule["grouping_scope"]:
-                items_group = items_dynamic
+            # Determine the bids (items) to which this rule applies.
+            if rule["grouping"].strip().lower() == "all" or not rule["grouping_scope"]:
+                bids_in_group = items_dynamic
+            elif rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                # For each unique grouping value, apply the rule separately.
+                if rule["grouping"].strip().lower() == "bid id":
+                    unique_groups = sorted(list(item_attr_data.keys()))
+                else:
+                    unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                                            for j in items_dynamic 
+                                            if str(item_attr_data[j].get(rule["grouping"], "")).strip()})
+                for group_val in unique_groups:
+                    if rule["grouping"].strip().lower() == "bid id":
+                        bids_in_group = [group_val]
+                    else:
+                        bids_in_group = [j for j in items_dynamic 
+                                        if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                    s_scope = rule["supplier_scope"].strip().lower() if rule["supplier_scope"] else None
+                    if s_scope == "lowest cost supplier":
+                        for j in bids_in_group:
+                            lp_problem += x[(lowest_cost_supplier[j], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                    elif s_scope == "second lowest cost supplier":
+                        for j in bids_in_group:
+                            lp_problem += x[(second_lowest_cost_supplier[j], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                    elif s_scope == "incumbent":
+                        for j in bids_in_group:
+                            incumbent = item_attr_data[j].get("Incumbent")
+                            if incumbent:
+                                lp_problem += x[(incumbent, j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                    elif s_scope == "new suppliers":
+                        for j in bids_in_group:
+                            incumbent = item_attr_data[j].get("Incumbent")
+                            for s in suppliers:
+                                if s != incumbent:
+                                    lp_problem += x[(s, j)] == 0, f"SupplierExclusion_{r_idx}_{j}_{s}"
+                    else:
+                        for j in bids_in_group:
+                            lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                continue
             else:
-                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-            for j in items_group:
-                lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                # Grouping scope is set to a specific value.
+                if rule["grouping"].strip().lower() == "bid id":
+                    bids_in_group = [rule["grouping_scope"].strip()]
+                else:
+                    bids_in_group = [j for j in items_dynamic 
+                                    if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                s_scope = rule["supplier_scope"].strip().lower() if rule["supplier_scope"] else None
+                if s_scope == "lowest cost supplier":
+                    for j in bids_in_group:
+                        lp_problem += x[(lowest_cost_supplier[j], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                elif s_scope == "second lowest cost supplier":
+                    for j in bids_in_group:
+                        lp_problem += x[(second_lowest_cost_supplier[j], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                elif s_scope == "incumbent":
+                    for j in bids_in_group:
+                        incumbent = item_attr_data[j].get("Incumbent")
+                        if incumbent:
+                            lp_problem += x[(incumbent, j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                elif s_scope == "new suppliers":
+                    for j in bids_in_group:
+                        incumbent = item_attr_data[j].get("Incumbent")
+                        for s in suppliers:
+                            if s != incumbent:
+                                lp_problem += x[(s, j)] == 0, f"SupplierExclusion_{r_idx}_{j}_{s}"
+                else:
+                    for j in bids_in_group:
+                        lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
+
+
+
+
         # "# Minimum volume awarded" rule.
         elif rule["rule_type"] == "# Minimum volume awarded":
             if rule["grouping"] == "All" or not rule["grouping_scope"]:
