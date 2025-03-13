@@ -752,48 +752,133 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
 
 
 
+        # "# Minimum Volume Awarded" rule.
+        elif rule["rule_type"].strip().lower() == "# minimum volume awarded":
+            # Convert the rule input to a float (the minimum volume threshold).
+            try:
+                min_volume = float(rule["rule_input"])
+            except Exception as e:
+                st.error(f"Invalid rule input for # Minimum Volume Awarded: {e}")
+                continue  # Skip this rule if conversion fails.
+    
+            # Check if the grouping scope is "Apply to all items individually"
+            if rule.get("grouping_scope", "").strip().lower() == "apply to all items individually":
+                # For each unique grouping value, create a group.
+                if rule["grouping"].strip().lower() == "bid id":
+                    unique_groups = sorted(list(item_attr_data.keys()))
+                else:
+                    unique_groups = sorted({
+                        str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                        for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""
+                    })
+                # Process each unique group separately.
+                for group_val in unique_groups:
+                    if rule["grouping"].strip().lower() == "bid id":
+                        items_group = [group_val]
+                    else:
+                        items_group = [j for j in items_dynamic
+                                       if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                    group_demand = sum(float(demand_data[j]) for j in items_group)
+                    st.write(f"Group: {items_group} | Total Demand: {group_demand} | Min Volume: {min_volume}")
+    
+                    # If the required minimum exceeds the group demand, force infeasibility.
+                    if min_volume > group_demand:
+                        lp_problem += 0 >= 1, f"MinVol_Infeasible_{r_idx}_{group_val}"
+                    else:
+                        # For each supplier, create a binary indicator variable.
+                        for s in suppliers:
+                            y = pulp.LpVariable(f"MinVol_{r_idx}_{s}_{group_val}", cat='Binary')
+                            # Upper bound: if y==0, supplier s gets 0 volume; if y==1, its volume cannot exceed group demand.
+                            lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= group_demand * y, f"MinVol_UB_{r_idx}_{s}_{group_val}"
+                            # Lower bound: if y==1 then supplier s must get at least min_volume.
+                            lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= min_volume * y, f"MinVol_LB_{r_idx}_{s}_{group_val}"
+            else:
+                # Use the provided grouping scope (a specific value or "All").
+                if rule["grouping"].strip().lower() == "all" or not rule.get("grouping_scope"):
+                    items_group = items_dynamic
+                elif rule["grouping"].strip().lower() == "bid id":
+                    items_group = [str(rule["grouping_scope"]).strip()]
+                else:
+                    items_group = [j for j in items_dynamic
+                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                group_demand = sum(float(demand_data[j]) for j in items_group)
+                st.write(f"Group: {items_group} | Total Demand: {group_demand} | Min Volume: {min_volume}")
+    
+                if min_volume > group_demand:
+                    lp_problem += 0 >= 1, f"MinVol_Infeasible_{r_idx}"
+                else:
+                    for s in suppliers:
+                        y = pulp.LpVariable(f"MinVol_{r_idx}_{s}", cat='Binary')
+                        lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= group_demand * y, f"MinVol_UB_{r_idx}_{s}"
+                        lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= min_volume * y, f"MinVol_LB_{r_idx}_{s}"
 
-        # "# Minimum volume awarded" rule.
-        elif rule["rule_type"] == "# Minimum volume awarded":
-            if rule["grouping"] == "All" or not rule["grouping_scope"]:
-                items_group = items_dynamic
-            elif rule["grouping"] == "Bid ID":
-                items_group = [rule["grouping_scope"]]
-            else:
-                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-            for s in suppliers:
-                y = pulp.LpVariable(f"MinVol_{r_idx}_{s}", cat='Binary')
-                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * y, f"MinVol_UB_{r_idx}_{s}"
-                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= float(rule["rule_input"]) * y, f"MinVol_LB_{r_idx}_{s}"
-        # "% Minimum volume awarded" rule.
-        elif rule["rule_type"] == "% Minimum volume awarded":
-            # Determine the items to which this rule applies.
-            if rule["grouping"] == "All" or not rule["grouping_scope"]:
-                items_group = items_dynamic
-            elif rule["grouping"] == "Bid ID":
-                items_group = [rule["grouping_scope"]]
-            else:
-                items_group = [j for j in items_dynamic 
-                            if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-            group_demand = sum(demand_data[j] for j in items_group)
-            # Remove the "%" and convert to a fraction.
-            min_pct = float(rule["rule_input"].rstrip("%")) / 100.0
 
-            if rule.get("supplier_scope") in [None, "All"]:
-                # Calculate the number of suppliers to activate. For example, for 33%, we want 3 suppliers.
-                n_suppliers = int(1 / min_pct)
-                # Create a binary indicator variable for each supplier.
-                y = {s: pulp.LpVariable(f"MinVolPctIndicator_{r_idx}_{s}", cat='Binary') for s in suppliers}
-                # Force exactly n_suppliers to be active.
-                lp_problem += pulp.lpSum(y[s] for s in suppliers) == n_suppliers, f"MinVolPctNumActive_{r_idx}"
-                # For each supplier, if active, it must receive at least the minimum volume.
-                for s in suppliers:
-                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= min_pct * group_demand * y[s], f"MinVolPct_{r_idx}_{s}"
-                    lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= M * y[s], f"MinVolPct_Link_{r_idx}_{s}"
+        # "% Minimum Volume Awarded" rule.
+        elif rule["rule_type"] == "% Minimum Volume Awarded":
+            try:
+                # Convert the rule input (e.g., "50%") to a fraction.
+                min_pct = float(rule["rule_input"].rstrip("%")) / 100.0
+            except Exception:
+                continue
+
+            # Check if the grouping scope is "Apply to all items individually"
+            if rule.get("grouping_scope", "") == "Apply to all items individually":
+                # Determine unique grouping values.
+                if rule["grouping"] == "Bid ID":
+                    unique_groups = sorted(list(item_attr_data.keys()))
+                else:
+                    unique_groups = sorted({
+                        str(item_attr_data[j].get(rule["grouping"], "")).strip()
+                        for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""
+                    })
+                # Apply the rule separately for each unique group.
+                for group_val in unique_groups:
+                    if rule["grouping"] == "Bid ID":
+                        items_group = [group_val]
+                    else:
+                        items_group = [j for j in items_dynamic
+                                       if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                    group_demand = sum(demand_data[j] for j in items_group)
+                    if rule.get("supplier_scope") in [None, "All"]:
+                        # Calculate the number of suppliers to activate, capped by the total number of suppliers.
+                        n_suppliers = min(int(1 / min_pct), len(suppliers))
+                        y = {s: pulp.LpVariable(f"MinVolPctIndicator_{r_idx}_{s}_{group_val}", cat='Binary')
+                             for s in suppliers}
+                        lp_problem += pulp.lpSum(y[s] for s in suppliers) == n_suppliers, f"MinVolPctNumActive_{r_idx}_{group_val}"
+                        for s in suppliers:
+                            lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) >=
+                                           min_pct * group_demand * y[s]), f"MinVolPct_{r_idx}_{s}_{group_val}"
+                            lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) <=
+                                           M * y[s]), f"MinVolPct_Link_{r_idx}_{s}_{group_val}"
+                    else:
+                        s = rule["supplier_scope"]
+                        lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) >=
+                                       min_pct * group_demand), f"MinVolPct_{r_idx}_{s}_{group_val}"
             else:
-                # A specific supplier is selected.
-                s = rule["supplier_scope"]
-                lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) >= min_pct * group_demand, f"MinVolPct_{r_idx}_{s}"
+                # Use the provided grouping scope (either a specific value or "All").
+                if rule["grouping"] == "All" or not rule.get("grouping_scope"):
+                    items_group = items_dynamic
+                elif rule["grouping"] == "Bid ID":
+                    items_group = [rule["grouping_scope"]]
+                else:
+                    items_group = [j for j in items_dynamic
+                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() ==
+                                   str(rule["grouping_scope"]).strip()]
+                group_demand = sum(demand_data[j] for j in items_group)
+                if rule.get("supplier_scope") in [None, "All"]:
+                    n_suppliers = min(int(1 / min_pct), len(suppliers))
+                    y = {s: pulp.LpVariable(f"MinVolPctIndicator_{r_idx}_{s}", cat='Binary') for s in suppliers}
+                    lp_problem += pulp.lpSum(y[s] for s in suppliers) == n_suppliers, f"MinVolPctNumActive_{r_idx}"
+                    for s in suppliers:
+                        lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) >=
+                                       min_pct * group_demand * y[s]), f"MinVolPct_{r_idx}_{s}"
+                        lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) <=
+                                       M * y[s]), f"MinVolPct_Link_{r_idx}_{s}"
+                else:
+                    s = rule["supplier_scope"]
+                    lp_problem += (pulp.lpSum(x[(s, j)] for j in items_group) >=
+                                   min_pct * group_demand), f"MinVolPct_{r_idx}_{s}"
+
 
     
     # Debug output.

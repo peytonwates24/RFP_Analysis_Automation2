@@ -2,42 +2,32 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
-BaseSpend_A: S0_A - 20 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
+BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
  - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
 BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 80 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 53 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
-BaseSpend_C: S0_C - 55 x_C_1 - 75 x_C_10 - 75 x_C_2 - 60 x_C_3 - 19 x_C_4
+BaseSpend_C: S0_C - 55 x_C_1 - 75 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
  - 24 x_C_5 - 64 x_C_6 - 86 x_C_7 - 24 x_C_8 - 13 x_C_9 = 0
-Capacity_A_Bid_ID_1: x_A_1 <= 10000
-Capacity_A_Bid_ID_10: x_A_10 <= 30002
-Capacity_A_Bid_ID_2: x_A_2 <= 13000
-Capacity_A_Bid_ID_3: x_A_3 <= 14000
-Capacity_A_Bid_ID_4: x_A_4 <= 21111
-Capacity_A_Bid_ID_5: x_A_5 <= 23132
-Capacity_A_Bid_ID_6: x_A_6 <= 20242
-Capacity_A_Bid_ID_7: x_A_7 <= 22212
-Capacity_A_Bid_ID_8: x_A_8 <= 19999
-Capacity_A_Bid_ID_9: x_A_9 <= 2321
-Capacity_B_Bid_ID_1: x_B_1 <= 20002
-Capacity_B_Bid_ID_10: x_B_10 <= 40001
-Capacity_B_Bid_ID_2: x_B_2 <= 24214
-Capacity_B_Bid_ID_3: x_B_3 <= 19232
-Capacity_B_Bid_ID_4: x_B_4 <= 1992
-Capacity_B_Bid_ID_5: x_B_5 <= 42410
-Capacity_B_Bid_ID_6: x_B_6 <= 222
-Capacity_B_Bid_ID_7: x_B_7 <= 2131
-Capacity_B_Bid_ID_8: x_B_8 <= 3000
-Capacity_B_Bid_ID_9: x_B_9 <= 4000
-Capacity_C_Bid_ID_1: x_C_1 <= 2192
-Capacity_C_Bid_ID_10: x_C_10 <= 8005
-Capacity_C_Bid_ID_2: x_C_2 <= 20203
-Capacity_C_Bid_ID_3: x_C_3 <= 32313
-Capacity_C_Bid_ID_4: x_C_4 <= 22131
-Capacity_C_Bid_ID_5: x_C_5 <= 14151
-Capacity_C_Bid_ID_6: x_C_6 <= 19962
-Capacity_C_Bid_ID_7: x_C_7 <= 11821
-Capacity_C_Bid_ID_8: x_C_8 <= 2131
-Capacity_C_Bid_ID_9: x_C_9 <= 40201
+Capacity_B_Bid_ID_1: x_B_1 <= 100000000
+Capacity_B_Bid_ID_10: x_B_10 <= 100000000
+Capacity_B_Bid_ID_2: x_B_2 <= 100000000
+Capacity_B_Bid_ID_3: x_B_3 <= 100000000
+Capacity_B_Bid_ID_4: x_B_4 <= 100000000
+Capacity_B_Bid_ID_5: x_B_5 <= 100000000
+Capacity_B_Bid_ID_6: x_B_6 <= 100000000
+Capacity_B_Bid_ID_7: x_B_7 <= 100000000
+Capacity_B_Bid_ID_8: x_B_8 <= 100000000
+Capacity_B_Bid_ID_9: x_B_9 <= 100000000
+Capacity_C_Bid_ID_1: x_C_1 <= 100000000
+Capacity_C_Bid_ID_10: x_C_10 <= 100000000
+Capacity_C_Bid_ID_2: x_C_2 <= 100000000
+Capacity_C_Bid_ID_3: x_C_3 <= 100000000
+Capacity_C_Bid_ID_4: x_C_4 <= 100000000
+Capacity_C_Bid_ID_5: x_C_5 <= 100000000
+Capacity_C_Bid_ID_6: x_C_6 <= 100000000
+Capacity_C_Bid_ID_7: x_C_7 <= 100000000
+Capacity_C_Bid_ID_8: x_C_8 <= 100000000
+Capacity_C_Bid_ID_9: x_C_9 <= 100000000
 Demand_1: x_A_1 + x_B_1 + x_C_1 = 700
 Demand_10: x_A_10 + x_B_10 + x_C_10 = 13
 Demand_2: x_A_2 + x_B_2 + x_C_2 = 9000
@@ -48,18 +38,18 @@ Demand_6: x_A_6 + x_B_6 + x_C_6 = 242
 Demand_7: x_A_7 + x_B_7 + x_C_7 = 664
 Demand_8: x_A_8 + x_B_8 + x_C_8 = 24
 Demand_9: x_A_9 + x_B_9 + x_C_9 = 232
-DiscountTierLower_A_0: d_A - 17073843 z_discount_A_0 >= -17073843
-DiscountTierLower_A_1: - 0.01 S0_A + d_A - 17073843 z_discount_A_1
- >= -17073843
-DiscountTierLower_B_0: d_B - 15248788 z_discount_B_0 >= -15248788
-DiscountTierLower_B_1: - 0.03 S0_B + d_B - 15248788 z_discount_B_1
- >= -15248788
-DiscountTierLower_C_0: d_C - 16791670 z_discount_C_0 >= -16791670
-DiscountTierLower_C_1: - 0.04 S0_C + d_C - 16791670 z_discount_C_1
- >= -16791670
-DiscountTierMax_A_0: 17073843 z_discount_A_0 <= 17074843
-DiscountTierMax_B_0: 15248788 z_discount_B_0 <= 15249288
-DiscountTierMax_C_0: 16791670 z_discount_C_0 <= 16792170
+DiscountTierLower_A_0: d_A - 19400000000 z_discount_A_0 >= -19400000000
+DiscountTierLower_A_1: - 0.01 S0_A + d_A - 19400000000 z_discount_A_1
+ >= -19400000000
+DiscountTierLower_B_0: d_B - 97000000000 z_discount_B_0 >= -97000000000
+DiscountTierLower_B_1: - 0.03 S0_B + d_B - 97000000000 z_discount_B_1
+ >= -97000000000
+DiscountTierLower_C_0: d_C - 97000000000 z_discount_C_0 >= -97000000000
+DiscountTierLower_C_1: - 0.04 S0_C + d_C - 97000000000 z_discount_C_1
+ >= -97000000000
+DiscountTierMax_A_0: 19400000000 z_discount_A_0 <= 19400001000
+DiscountTierMax_B_0: 97000000000 z_discount_B_0 <= 97000000500
+DiscountTierMax_C_0: 97000000000 z_discount_C_0 <= 97000000500
 _dummy: __dummy = 0
 DiscountTierMin_A_0: __dummy >= 0
 DiscountTierMin_A_1: x_A_1 + x_A_10 + x_A_3 + x_A_4 + x_A_8 + x_A_9
@@ -72,26 +62,30 @@ DiscountTierMin_C_1: x_C_1 + x_C_10 + x_C_3 + x_C_4 + x_C_8 + x_C_9
 DiscountTierSelect_A: z_discount_A_0 + z_discount_A_1 = 1
 DiscountTierSelect_B: z_discount_B_0 + z_discount_B_1 = 1
 DiscountTierSelect_C: z_discount_C_0 + z_discount_C_1 = 1
-DiscountTierUpper_A_0: d_A + 17073843 z_discount_A_0 <= 17073843
-DiscountTierUpper_A_1: - 0.01 S0_A + d_A + 17073843 z_discount_A_1 <= 17073843
-DiscountTierUpper_B_0: d_B + 15248788 z_discount_B_0 <= 15248788
-DiscountTierUpper_B_1: - 0.03 S0_B + d_B + 15248788 z_discount_B_1 <= 15248788
-DiscountTierUpper_C_0: d_C + 16791670 z_discount_C_0 <= 16791670
-DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 16791670 z_discount_C_1 <= 16791670
+DiscountTierUpper_A_0: d_A + 19400000000 z_discount_A_0 <= 19400000000
+DiscountTierUpper_A_1: - 0.01 S0_A + d_A + 19400000000 z_discount_A_1
+ <= 19400000000
+DiscountTierUpper_B_0: d_B + 97000000000 z_discount_B_0 <= 97000000000
+DiscountTierUpper_B_1: - 0.03 S0_B + d_B + 97000000000 z_discount_B_1
+ <= 97000000000
+DiscountTierUpper_C_0: d_C + 97000000000 z_discount_C_0 <= 97000000000
+DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
+ <= 97000000000
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-RebateTierLower_A_0: rebate_A - 17073843 y_rebate_A_0 >= -17073843
-RebateTierLower_A_1: - 0.1 S_A + rebate_A - 17073843 y_rebate_A_1 >= -17073843
-RebateTierLower_B_0: rebate_B - 15248788 y_rebate_B_0 >= -15248788
-RebateTierLower_B_1: - 0.05 S_B + rebate_B - 15248788 y_rebate_B_1
- >= -15248788
-RebateTierLower_C_0: rebate_C - 16791670 y_rebate_C_0 >= -16791670
-RebateTierLower_C_1: - 0.07 S_C + rebate_C - 16791670 y_rebate_C_1
- >= -16791670
-RebateTierMax_A_0: 17073843 y_rebate_A_0 <= 17074343
-RebateTierMax_B_0: 15248788 y_rebate_B_0 <= 15249288
-RebateTierMax_C_0: 16791670 y_rebate_C_0 <= 16792370
+RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
+RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
+ >= -19400000000
+RebateTierLower_B_0: rebate_B - 97000000000 y_rebate_B_0 >= -97000000000
+RebateTierLower_B_1: - 0.05 S_B + rebate_B - 97000000000 y_rebate_B_1
+ >= -97000000000
+RebateTierLower_C_0: rebate_C - 97000000000 y_rebate_C_0 >= -97000000000
+RebateTierLower_C_1: - 0.07 S_C + rebate_C - 97000000000 y_rebate_C_1
+ >= -97000000000
+RebateTierMax_A_0: 19400000000 y_rebate_A_0 <= 19400000500
+RebateTierMax_B_0: 97000000000 y_rebate_B_0 <= 97000000500
+RebateTierMax_C_0: 97000000000 y_rebate_C_0 <= 97000000700
 RebateTierMin_A_0: __dummy >= 0
 RebateTierMin_A_1: - 500 y_rebate_A_1 >= 0
 RebateTierMin_B_0: __dummy >= 0
@@ -102,82 +96,15 @@ RebateTierMin_C_1: x_C_1 + x_C_10 + x_C_3 + x_C_4 + x_C_8 + x_C_9
 RebateTierSelect_A: y_rebate_A_0 + y_rebate_A_1 = 1
 RebateTierSelect_B: y_rebate_B_0 + y_rebate_B_1 = 1
 RebateTierSelect_C: y_rebate_C_0 + y_rebate_C_1 = 1
-RebateTierUpper_A_0: rebate_A + 17073843 y_rebate_A_0 <= 17073843
-RebateTierUpper_A_1: - 0.1 S_A + rebate_A + 17073843 y_rebate_A_1 <= 17073843
-RebateTierUpper_B_0: rebate_B + 15248788 y_rebate_B_0 <= 15248788
-RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 15248788 y_rebate_B_1 <= 15248788
-RebateTierUpper_C_0: rebate_C + 16791670 y_rebate_C_0 <= 16791670
-RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 16791670 y_rebate_C_1 <= 16791670
-SupplIndicatorLB_0_A_1: - w_0_A_1 + x_A_1 >= 0
-SupplIndicatorLB_0_A_10: - w_0_A_10 + x_A_10 >= 0
-SupplIndicatorLB_0_A_2: - w_0_A_2 + x_A_2 >= 0
-SupplIndicatorLB_0_A_3: - w_0_A_3 + x_A_3 >= 0
-SupplIndicatorLB_0_A_4: - w_0_A_4 + x_A_4 >= 0
-SupplIndicatorLB_0_A_5: - w_0_A_5 + x_A_5 >= 0
-SupplIndicatorLB_0_A_6: - w_0_A_6 + x_A_6 >= 0
-SupplIndicatorLB_0_A_7: - w_0_A_7 + x_A_7 >= 0
-SupplIndicatorLB_0_A_8: - w_0_A_8 + x_A_8 >= 0
-SupplIndicatorLB_0_A_9: - w_0_A_9 + x_A_9 >= 0
-SupplIndicatorLB_0_B_1: - w_0_B_1 + x_B_1 >= 0
-SupplIndicatorLB_0_B_10: - w_0_B_10 + x_B_10 >= 0
-SupplIndicatorLB_0_B_2: - w_0_B_2 + x_B_2 >= 0
-SupplIndicatorLB_0_B_3: - w_0_B_3 + x_B_3 >= 0
-SupplIndicatorLB_0_B_4: - w_0_B_4 + x_B_4 >= 0
-SupplIndicatorLB_0_B_5: - w_0_B_5 + x_B_5 >= 0
-SupplIndicatorLB_0_B_6: - w_0_B_6 + x_B_6 >= 0
-SupplIndicatorLB_0_B_7: - w_0_B_7 + x_B_7 >= 0
-SupplIndicatorLB_0_B_8: - w_0_B_8 + x_B_8 >= 0
-SupplIndicatorLB_0_B_9: - w_0_B_9 + x_B_9 >= 0
-SupplIndicatorLB_0_C_1: - w_0_C_1 + x_C_1 >= 0
-SupplIndicatorLB_0_C_10: - w_0_C_10 + x_C_10 >= 0
-SupplIndicatorLB_0_C_2: - w_0_C_2 + x_C_2 >= 0
-SupplIndicatorLB_0_C_3: - w_0_C_3 + x_C_3 >= 0
-SupplIndicatorLB_0_C_4: - w_0_C_4 + x_C_4 >= 0
-SupplIndicatorLB_0_C_5: - w_0_C_5 + x_C_5 >= 0
-SupplIndicatorLB_0_C_6: - w_0_C_6 + x_C_6 >= 0
-SupplIndicatorLB_0_C_7: - w_0_C_7 + x_C_7 >= 0
-SupplIndicatorLB_0_C_8: - w_0_C_8 + x_C_8 >= 0
-SupplIndicatorLB_0_C_9: - w_0_C_9 + x_C_9 >= 0
-SupplIndicator_0_A_1: - 1000000000 w_0_A_1 + x_A_1 <= 0
-SupplIndicator_0_A_10: - 1000000000 w_0_A_10 + x_A_10 <= 0
-SupplIndicator_0_A_2: - 1000000000 w_0_A_2 + x_A_2 <= 0
-SupplIndicator_0_A_3: - 1000000000 w_0_A_3 + x_A_3 <= 0
-SupplIndicator_0_A_4: - 1000000000 w_0_A_4 + x_A_4 <= 0
-SupplIndicator_0_A_5: - 1000000000 w_0_A_5 + x_A_5 <= 0
-SupplIndicator_0_A_6: - 1000000000 w_0_A_6 + x_A_6 <= 0
-SupplIndicator_0_A_7: - 1000000000 w_0_A_7 + x_A_7 <= 0
-SupplIndicator_0_A_8: - 1000000000 w_0_A_8 + x_A_8 <= 0
-SupplIndicator_0_A_9: - 1000000000 w_0_A_9 + x_A_9 <= 0
-SupplIndicator_0_B_1: - 1000000000 w_0_B_1 + x_B_1 <= 0
-SupplIndicator_0_B_10: - 1000000000 w_0_B_10 + x_B_10 <= 0
-SupplIndicator_0_B_2: - 1000000000 w_0_B_2 + x_B_2 <= 0
-SupplIndicator_0_B_3: - 1000000000 w_0_B_3 + x_B_3 <= 0
-SupplIndicator_0_B_4: - 1000000000 w_0_B_4 + x_B_4 <= 0
-SupplIndicator_0_B_5: - 1000000000 w_0_B_5 + x_B_5 <= 0
-SupplIndicator_0_B_6: - 1000000000 w_0_B_6 + x_B_6 <= 0
-SupplIndicator_0_B_7: - 1000000000 w_0_B_7 + x_B_7 <= 0
-SupplIndicator_0_B_8: - 1000000000 w_0_B_8 + x_B_8 <= 0
-SupplIndicator_0_B_9: - 1000000000 w_0_B_9 + x_B_9 <= 0
-SupplIndicator_0_C_1: - 1000000000 w_0_C_1 + x_C_1 <= 0
-SupplIndicator_0_C_10: - 1000000000 w_0_C_10 + x_C_10 <= 0
-SupplIndicator_0_C_2: - 1000000000 w_0_C_2 + x_C_2 <= 0
-SupplIndicator_0_C_3: - 1000000000 w_0_C_3 + x_C_3 <= 0
-SupplIndicator_0_C_4: - 1000000000 w_0_C_4 + x_C_4 <= 0
-SupplIndicator_0_C_5: - 1000000000 w_0_C_5 + x_C_5 <= 0
-SupplIndicator_0_C_6: - 1000000000 w_0_C_6 + x_C_6 <= 0
-SupplIndicator_0_C_7: - 1000000000 w_0_C_7 + x_C_7 <= 0
-SupplIndicator_0_C_8: - 1000000000 w_0_C_8 + x_C_8 <= 0
-SupplIndicator_0_C_9: - 1000000000 w_0_C_9 + x_C_9 <= 0
-SupplierCount_0_1: w_0_A_1 + w_0_B_1 + w_0_C_1 = 3
-SupplierCount_0_10: w_0_A_10 + w_0_B_10 + w_0_C_10 = 3
-SupplierCount_0_2: w_0_A_2 + w_0_B_2 + w_0_C_2 = 3
-SupplierCount_0_3: w_0_A_3 + w_0_B_3 + w_0_C_3 = 3
-SupplierCount_0_4: w_0_A_4 + w_0_B_4 + w_0_C_4 = 3
-SupplierCount_0_5: w_0_A_5 + w_0_B_5 + w_0_C_5 = 3
-SupplierCount_0_6: w_0_A_6 + w_0_B_6 + w_0_C_6 = 3
-SupplierCount_0_7: w_0_A_7 + w_0_B_7 + w_0_C_7 = 3
-SupplierCount_0_8: w_0_A_8 + w_0_B_8 + w_0_C_8 = 3
-SupplierCount_0_9: w_0_A_9 + w_0_B_9 + w_0_C_9 = 3
+RebateTierUpper_A_0: rebate_A + 19400000000 y_rebate_A_0 <= 19400000000
+RebateTierUpper_A_1: - 0.1 S_A + rebate_A + 19400000000 y_rebate_A_1
+ <= 19400000000
+RebateTierUpper_B_0: rebate_B + 97000000000 y_rebate_B_0 <= 97000000000
+RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
+ <= 97000000000
+RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
+RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
+ <= 97000000000
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -225,36 +152,6 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
-w_0_A_1
-w_0_A_10
-w_0_A_2
-w_0_A_3
-w_0_A_4
-w_0_A_5
-w_0_A_6
-w_0_A_7
-w_0_A_8
-w_0_A_9
-w_0_B_1
-w_0_B_10
-w_0_B_2
-w_0_B_3
-w_0_B_4
-w_0_B_5
-w_0_B_6
-w_0_B_7
-w_0_B_8
-w_0_B_9
-w_0_C_1
-w_0_C_10
-w_0_C_2
-w_0_C_3
-w_0_C_4
-w_0_C_5
-w_0_C_6
-w_0_C_7
-w_0_C_8
-w_0_C_9
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
