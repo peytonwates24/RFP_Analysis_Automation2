@@ -74,24 +74,15 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-MinVolPct_LB_0_A_216520528749813870: - 8595 MinVolPct_0_A_216520528749813870
- + x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7 + x_A_8
- + x_A_9 >= 0
-MinVolPct_LB_0_B_216520528749813870: - 8595 MinVolPct_0_B_216520528749813870
- + x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7 + x_B_8
- + x_B_9 >= 0
-MinVolPct_LB_0_C_216520528749813870: - 8595 MinVolPct_0_C_216520528749813870
- + x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7 + x_C_8
- + x_C_9 >= 0
-MinVolPct_UB_0_A_216520528749813870: - 17190 MinVolPct_0_A_216520528749813870
- + x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7 + x_A_8
- + x_A_9 <= 0
-MinVolPct_UB_0_B_216520528749813870: - 17190 MinVolPct_0_B_216520528749813870
- + x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7 + x_B_8
- + x_B_9 <= 0
-MinVolPct_UB_0_C_216520528749813870: - 17190 MinVolPct_0_C_216520528749813870
- + x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7 + x_C_8
- + x_C_9 <= 0
+MinVol_LB_1_A_Large_Gadget: - 1000000000 MinVol_1_A_Large_Gadget + x_A_6
+ + x_A_7 >= -999999550
+MinVol_LB_1_B_Large_Gadget: - 1000000000 MinVol_1_B_Large_Gadget + x_B_6
+ + x_B_7 >= -999999550
+MinVol_LB_1_C_Large_Gadget: - 1000000000 MinVol_1_C_Large_Gadget + x_C_6
+ + x_C_7 >= -999999550
+MinVol_UB_1_A_Large_Gadget: - 906 MinVol_1_A_Large_Gadget + x_A_6 + x_A_7 <= 0
+MinVol_UB_1_B_Large_Gadget: - 906 MinVol_1_B_Large_Gadget + x_B_6 + x_B_7 <= 0
+MinVol_UB_1_C_Large_Gadget: - 906 MinVol_1_C_Large_Gadget + x_C_6 + x_C_7 <= 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
@@ -123,6 +114,20 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
+SupplIndicatorLB_0_A_6: - w_0_A_6 + x_A_6 >= 0
+SupplIndicatorLB_0_A_7: - w_0_A_7 + x_A_7 >= 0
+SupplIndicatorLB_0_B_6: - w_0_B_6 + x_B_6 >= 0
+SupplIndicatorLB_0_B_7: - w_0_B_7 + x_B_7 >= 0
+SupplIndicatorLB_0_C_6: - w_0_C_6 + x_C_6 >= 0
+SupplIndicatorLB_0_C_7: - w_0_C_7 + x_C_7 >= 0
+SupplIndicator_0_A_6: - 1000000000 w_0_A_6 + x_A_6 <= 0
+SupplIndicator_0_A_7: - 1000000000 w_0_A_7 + x_A_7 <= 0
+SupplIndicator_0_B_6: - 1000000000 w_0_B_6 + x_B_6 <= 0
+SupplIndicator_0_B_7: - 1000000000 w_0_B_7 + x_B_7 <= 0
+SupplIndicator_0_C_6: - 1000000000 w_0_C_6 + x_C_6 <= 0
+SupplIndicator_0_C_7: - 1000000000 w_0_C_7 + x_C_7 <= 0
+SupplierCount_0_6: w_0_A_6 + w_0_B_6 + w_0_C_6 = 2
+SupplierCount_0_7: w_0_A_7 + w_0_B_7 + w_0_C_7 = 2
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -150,9 +155,9 @@ Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
 Volume_C: V_C - x_C_1 - x_C_10 - x_C_2 - x_C_3 - x_C_4 - x_C_5 - x_C_6 - x_C_7
  - x_C_8 - x_C_9 = 0
 Binaries
-MinVolPct_0_A_216520528749813870
-MinVolPct_0_B_216520528749813870
-MinVolPct_0_C_216520528749813870
+MinVol_1_A_Large_Gadget
+MinVol_1_B_Large_Gadget
+MinVol_1_C_Large_Gadget
 T_10_A
 T_10_B
 T_1_B
@@ -173,6 +178,12 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
+w_0_A_6
+w_0_A_7
+w_0_B_6
+w_0_B_7
+w_0_C_6
+w_0_C_7
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
