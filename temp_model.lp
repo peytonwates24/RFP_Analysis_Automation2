@@ -7,7 +7,7 @@ BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
 BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
 BaseSpend_C: S0_C - 55 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
- - 24 x_C_5 - 64 x_C_6 - 23 x_C_7 - 24 x_C_8 - 13 x_C_9 = 0
+ - 42 x_C_7 - 24 x_C_8 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
@@ -74,12 +74,9 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-MinVolAwarded_LB_1_A_1: - 300 award_indicator_1_A_1 + x_A_1 >= 0
-MinVolAwarded_LB_1_B_1: - 300 award_indicator_1_B_1 + x_B_1 >= 0
-MinVolAwarded_LB_1_C_1: - 300 award_indicator_1_C_1 + x_C_1 >= 0
-MinVolAwarded_UB_1_A_1: - 700 award_indicator_1_A_1 + x_A_1 <= 0
-MinVolAwarded_UB_1_B_1: - 700 award_indicator_1_B_1 + x_B_1 <= 0
-MinVolAwarded_UB_1_C_1: - 700 award_indicator_1_C_1 + x_C_1 <= 0
+NonBid_C_5: x_C_5 = 0
+NonBid_C_6: x_C_6 = 0
+NonBid_C_9: x_C_9 = 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
@@ -111,13 +108,6 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
-SupplIndicatorLB_0_A_1: - w_0_A_1 + x_A_1 >= 0
-SupplIndicatorLB_0_B_1: - w_0_B_1 + x_B_1 >= 0
-SupplIndicatorLB_0_C_1: - w_0_C_1 + x_C_1 >= 0
-SupplIndicator_0_A_1: - 1000000000 w_0_A_1 + x_A_1 <= 0
-SupplIndicator_0_B_1: - 1000000000 w_0_B_1 + x_B_1 <= 0
-SupplIndicator_0_C_1: - 1000000000 w_0_C_1 + x_C_1 <= 0
-SupplierCount_0_1: w_0_A_1 + w_0_B_1 + w_0_C_1 = 2
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -165,12 +155,6 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
-award_indicator_1_A_1
-award_indicator_1_B_1
-award_indicator_1_C_1
-w_0_A_1
-w_0_B_1
-w_0_C_1
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0

@@ -7,8 +7,6 @@ import streamlit as st
 # Global constant for Big-M constraints.
 M = 1e9
 
-# Push message
-
 #############################################
 # REQUIRED COLUMNS for Excel Validation
 #############################################
@@ -65,12 +63,17 @@ def df_to_dict_item_attributes(df):
 def df_to_dict_price(df):
     """
     Convert the "Price" sheet into a dictionary keyed by (Supplier Name, Bid ID) with price values.
+    Rows with missing or zero Price are skipped.
     """
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
         bid = str(row["Bid ID"]).strip()
-        d[(supplier, bid)] = row["Price"]
+        price = row["Price"]
+        # Skip rows with missing or 0 price
+        if pd.isna(price) or price == 0:
+            continue
+        d[(supplier, bid)] = price
     return d
 
 def df_to_dict_demand(df):
@@ -139,7 +142,6 @@ def df_to_dict_supplier_bid_attributes(df):
 #############################################
 # Helper for Custom Rule Text Representation
 #############################################
-# Define rule_to_text first (or import it)
 def rule_to_text(rule):
     # Retrieve grouping and supplier information.
     grouping = rule.get("grouping", "all items")
@@ -180,7 +182,6 @@ def rule_to_text(rule):
         return f"For {grouping_scope_str}, the supplier must be awarded at least {rule['rule_input']} of the total volume."
     else:
         return str(rule)
-
 
 def expand_rule_text(rule, item_attr_data):
     """
@@ -284,6 +285,12 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     for j in items_dynamic:
         lp_problem += pulp.lpSum(x[(s, j)] for s in suppliers) == demand_data[j], f"Demand_{j}"
     
+    # Force volume to 0 for supplier-bid pairs that did not submit a valid bid.
+    for s in suppliers:
+        for j in items_dynamic:
+            if (s, j) not in price_data:
+                lp_problem += x[(s, j)] == 0, f"NonBid_{s}_{j}"
+    
     # Transition constraints.
     for j in items_dynamic:
         for s in suppliers:
@@ -301,11 +308,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     
     # Base spend and volume.
     for s in suppliers:
-        lp_problem += S0[s] == pulp.lpSum(price_data[(s, j)] * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
+        lp_problem += S0[s] == pulp.lpSum(price_data.get((s, j), 0) * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
         lp_problem += V[s] == pulp.lpSum(x[(s, j)] for j in items_dynamic), f"Volume_{s}"
     
     # Compute supplier-specific Big-M values.
-    max_price_val = max(price_data.values())
+    max_price_val = max(price_data.values()) if price_data else 0
     U_spend = {}
     for s in suppliers:
         total_cap = sum(cap for ((sup, _, _), cap) in capacity_data.items() if sup == s)
@@ -383,38 +390,29 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     #############################################
     for r_idx, rule in enumerate(rules):
         # "# of suppliers" rule.
-        # "# of Suppliers" rule.
         if rule["rule_type"].lower() == "# of suppliers":
             try:
                 supplier_target = int(rule["rule_input"])
             except Exception:
                 continue
             operator = rule["operator"].lower()
-            # Determine the set of items (groupings) to which this rule applies.
-            # (For # of Suppliers, the supplier scope is ignored.)
             if rule["grouping"].strip().lower() == "all" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             elif rule["grouping_scope"].strip().lower() == "apply to all items individually":
-                # For each unique grouping value (e.g. each Bid ID or other grouping),
-                # process them one at a time.
                 if rule["grouping"].strip().lower() == "bid id":
                     unique_groups = sorted(list(item_attr_data.keys()))
                 else:
                     unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() 
                                               for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip()})
-                # Process each unique grouping value separately.
                 for group_val in unique_groups:
                     if rule["grouping"].strip().lower() == "bid id":
                         subgroup = [group_val]
                     else:
-                        subgroup = [j for j in items_dynamic 
-                                    if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                        subgroup = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
                     for j in subgroup:
-                        # Create binary indicator variables for each supplier for item j.
                         w = {}
                         for s in suppliers:
                             w[(s, j)] = pulp.LpVariable(f"w_{r_idx}_{s}_{j}", cat='Binary')
-                            # epsilon: the minimum volume to count as "active" (set to 1 unit here).
                             epsilon = 1  
                             lp_problem += x[(s, j)] <= M * w[(s, j)], f"SupplIndicator_{r_idx}_{s}_{j}"
                             lp_problem += x[(s, j)] >= epsilon * w[(s, j)], f"SupplIndicatorLB_{r_idx}_{s}_{j}"
@@ -424,16 +422,12 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) <= supplier_target, f"SupplierCount_{r_idx}_{j}"
                         elif operator == "exactly":
                             lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == supplier_target, f"SupplierCount_{r_idx}_{j}"
-                # After processing each unique group, continue to the next rule.
                 continue
             else:
-                # Grouping scope is a specific value.
                 if rule["grouping"].strip().lower() == "bid id":
                     items_group = [rule["grouping_scope"].strip()]
                 else:
-                    items_group = [j for j in items_dynamic 
-                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-            # For each item in the specified group, create and add constraints.
+                    items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
             for j in items_group:
                 w = {}
                 for s in suppliers:
@@ -447,17 +441,13 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) <= supplier_target, f"SupplierCount_{r_idx}_{j}"
                 elif operator == "exactly":
                     lp_problem += pulp.lpSum(w[(s, j)] for s in suppliers) == supplier_target, f"SupplierCount_{r_idx}_{j}"
-
-
-
+    
         # "% of Volume Awarded" rule.
         elif rule["rule_type"] == "% of Volume Awarded":
             try:
-                # Convert the rule input (which may include a trailing "%") into a fraction.
                 percentage = float(rule["rule_input"].rstrip("%")) / 100.0
             except Exception as e:
                 continue
-
             if rule["grouping"].strip() == "Bid ID":
                 if rule["grouping_scope"].strip().lower() == "all":
                     items_group = items_dynamic
@@ -465,11 +455,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     items_group = sorted(list(item_attr_data.keys()))
                 else:
                     items_group = [rule["grouping_scope"].strip()]
-
-
                 for j in items_group:
                     total_vol = pulp.lpSum(x[(s, j)] for s in suppliers)
-                    # Handle special supplier scope options.
                     if rule["supplier_scope"] in ["Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent", "New Suppliers"]:
                         if rule["supplier_scope"] == "Lowest cost supplier":
                             supplier_for_rule = lowest_cost_supplier[j]
@@ -480,15 +467,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         elif rule["supplier_scope"] == "Incumbent":
                             supplier_for_rule = item_attr_data[j].get("Incumbent")
                             lhs = x[(supplier_for_rule, j)]
-                        elif rule["supplier_scope"] == "New Suppliers":                          
-                            # For new suppliers, sum the volumes for all suppliers except the incumbent.
+                        elif rule["supplier_scope"] == "New Suppliers":
                             incumbent = item_attr_data[j].get("Incumbent")
                             lhs = pulp.lpSum(x[(s, j)] for s in suppliers if s != incumbent)
-
                     else:
-                        # For a specific supplier provided as a name.
                         lhs = x[(rule["supplier_scope"], j)]
-
                     if rule["operator"] == "At least":
                         lp_problem += lhs >= percentage * total_vol, f"Rule_{r_idx}_{j}"
                     elif rule["operator"] == "At most":
@@ -496,8 +479,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     elif rule["operator"] == "Exactly":
                         lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}_{j}"
             else:
-                # For non-Bid ID groupings (if needed), you can add similar logic.
-                # (For simplicity, you might choose to restrict "New Suppliers" to Bid ID grouping only.)
                 if rule["grouping"] == "All" or rule["grouping_scope"] == "All":
                     items_group = items_dynamic
                 elif rule["grouping_scope"] == "Apply to all items individually":
@@ -505,10 +486,9 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         items_group = sorted(list(item_attr_data.keys()))
                     else:
                         items_group = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
-                                            for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
+                                              for j in item_attr_data if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 else:
                     items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
-
                 if rule["supplier_scope"] in ["Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]:
                     if rule["supplier_scope"] == "Lowest cost supplier":
                         lhs = pulp.lpSum(x[(lowest_cost_supplier[j], j)] for j in items_group)
@@ -517,9 +497,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     elif rule["supplier_scope"] == "Incumbent":
                         lhs = pulp.lpSum(x[(item_attr_data[j].get("Incumbent"), j)] for j in items_group)
                 elif rule["supplier_scope"] == "New Suppliers":
-                    # For aggregated non-Bid ID groupings, you might choose to disallow "New Suppliers"
-                    # or define a similar aggregation that sums over all suppliers not equal to the incumbent for each bid.
-                    # For example:
                     lhs = pulp.lpSum(pulp.lpSum(x[(s, j)] for s in suppliers if s != item_attr_data[j].get("Incumbent")) for j in items_group)
                 else:
                     lhs = pulp.lpSum(x[(rule["supplier_scope"], j)] for j in items_group)
@@ -530,51 +507,36 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     lp_problem += lhs <= percentage * total_vol, f"Rule_{r_idx}"
                 elif rule["operator"] == "Exactly":
                     lp_problem += lhs == percentage * total_vol, f"Rule_{r_idx}"
-
-
-
+    
         # "# of Volume Awarded" rule.
         elif rule["rule_type"] == "# of Volume Awarded":
-            # Determine the items (e.g. Bid IDs) to which this rule applies.
             if rule["grouping"] == "All" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             elif rule["grouping"] == "Bid ID":
-                # Special handling: if grouping_scope is "Apply to all items individually", use all bids.
                 if rule["grouping_scope"].strip().lower() == "apply to all items individually":
                     items_group = items_dynamic
                 else:
                     items_group = [rule["grouping_scope"]]
             else:
-                items_group = [j for j in items_dynamic 
-                                if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                items_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
             try:
                 volume_target = float(rule["rule_input"])
             except Exception:
                 continue
             operator = rule["operator"].lower()
             supplier_scope_value = rule["supplier_scope"]
-
-            # For the default case where Supplier Scope is "All"
             if supplier_scope_value is None or supplier_scope_value.lower() == "all":
-                # For each bid (or group item) and each supplier, introduce a binary indicator variable
-                # that “activates” the constraint only if that supplier is awarded.
                 for j in items_group:
                     for s in suppliers:
-                        # y_{r,s,j} is 1 if supplier s is awarded bid j, and 0 otherwise.
                         y = pulp.LpVariable(f"award_indicator_{r_idx}_{s}_{j}", cat='Binary')
-                        # Upper bound: if y==0 then x[s,j] must be 0.
                         lp_problem += x[(s, j)] <= float(demand_data[j]) * y, f"MinVolAwarded_UB_{r_idx}_{s}_{j}"
                         if operator == "at least":
                             lp_problem += x[(s, j)] >= volume_target * y, f"MinVolAwarded_LB_{r_idx}_{s}_{j}"
                         elif operator == "exactly":
                             lp_problem += x[(s, j)] == volume_target * y, f"MinVolAwarded_Exact_{r_idx}_{s}_{j}"
                         elif operator == "at most":
-                            # When "at most" is chosen, if awarded (y==1) x[s,j] must be no more than volume_target.
                             lp_problem += x[(s, j)] <= volume_target + M * (1 - y), f"MinVolAwarded_AtMost_{r_idx}_{s}_{j}"
-            # (You can add additional branches here for supplier_scope being "new suppliers", "lowest cost supplier", etc.,
-            # using similar binary indicator logic.)
             else:
-                # For a specific supplier name provided directly:
                 for j in items_group:
                     y = pulp.LpVariable(f"award_indicator_{r_idx}_{supplier_scope_value}_{j}", cat='Binary')
                     lp_problem += x[(supplier_scope_value, j)] <= float(demand_data[j]) * y, f"MinVolAwarded_{r_idx}_{supplier_scope_value}_UB_{j}"
@@ -584,9 +546,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += x[(supplier_scope_value, j)] == volume_target * y, f"MinVolAwarded_{r_idx}_{supplier_scope_value}_Exact_{j}"
                     elif operator == "at most":
                         lp_problem += x[(supplier_scope_value, j)] <= volume_target + M * (1 - y), f"MinVolAwarded_{r_idx}_{supplier_scope_value}_AtMost_{j}"
-
-
-
+    
         # "# of transitions" rule.
         elif rule["rule_type"] == "# of transitions":
             if rule["grouping"] == "All" or not rule["grouping_scope"]:
@@ -611,6 +571,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 lp_problem += total_transitions <= transitions_target, f"Rule_{r_idx}"
             elif operator == "Exactly":
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
+    
         # "Bid Exclusions" rule.
         elif rule["rule_type"] == "Bid Exclusions":
             if rule["grouping"] == "Bid ID":
@@ -647,25 +608,22 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             exclude = True
                     if exclude:
                         lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
+    
         # "Supplier Exclusion" rule.
         elif rule["rule_type"] == "Supplier Exclusion":
-            # Determine the bids (items) to which this rule applies.
             if rule["grouping"].strip().lower() == "all" or not rule["grouping_scope"]:
                 bids_in_group = items_dynamic
             elif rule["grouping_scope"].strip().lower() == "apply to all items individually":
-                # For each unique grouping value, apply the rule separately.
                 if rule["grouping"].strip().lower() == "bid id":
                     unique_groups = sorted(list(item_attr_data.keys()))
                 else:
                     unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip()
-                                            for j in items_dynamic 
-                                            if str(item_attr_data[j].get(rule["grouping"], "")).strip()})
+                                            for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip()})
                 for group_val in unique_groups:
                     if rule["grouping"].strip().lower() == "bid id":
                         bids_in_group = [group_val]
                     else:
-                        bids_in_group = [j for j in items_dynamic 
-                                        if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                        bids_in_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
                     s_scope = rule["supplier_scope"].strip().lower() if rule["supplier_scope"] else None
                     if s_scope == "lowest cost supplier":
                         for j in bids_in_group:
@@ -689,12 +647,10 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
                 continue
             else:
-                # Grouping scope is set to a specific value.
                 if rule["grouping"].strip().lower() == "bid id":
                     bids_in_group = [rule["grouping_scope"].strip()]
                 else:
-                    bids_in_group = [j for j in items_dynamic 
-                                    if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                    bids_in_group = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
                 s_scope = rule["supplier_scope"].strip().lower() if rule["supplier_scope"] else None
                 if s_scope == "lowest cost supplier":
                     for j in bids_in_group:
@@ -716,34 +672,25 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 else:
                     for j in bids_in_group:
                         lp_problem += x[(rule["supplier_scope"], j)] == 0, f"SupplierExclusion_{r_idx}_{j}"
-
-
-
+    
         # "# Minimum Volume Awarded" rule.
         elif rule["rule_type"].strip().lower() == "# minimum volume awarded":
-            # Convert the rule input to a float (the minimum volume threshold).
             try:
                 min_volume = float(rule["rule_input"])
             except Exception as e:
                 print(f"Invalid rule input for # Minimum Volume Awarded: {e}")
-                continue  # Skip this rule if conversion fails.
-    
-            # Build groups (each group is a list of bid IDs) over which the rule applies.
+                continue
             if rule.get("grouping_scope", "").strip().lower() == "apply to all items individually":
                 if rule["grouping"].strip().lower() == "bid id":
                     unique_groups = sorted(list(item_attr_data.keys()))
                 else:
-                    unique_groups = sorted({
-                        str(item_attr_data[j].get(rule["grouping"], "")).strip()
-                        for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""
-                    })
+                    unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 items_group_list = []
                 for group_val in unique_groups:
                     if rule["grouping"].strip().lower() == "bid id":
                         items_group_list.append((group_val, [group_val]))
                     else:
-                        group_items = [j for j in items_dynamic
-                                       if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                        group_items = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
                         if group_items:
                             items_group_list.append((group_val, group_items))
             else:
@@ -754,101 +701,67 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     items_group_list = [(group_val, [group_val])]
                 else:
                     group_val = str(rule["grouping_scope"]).strip()
-                    group_items = [j for j in items_dynamic
-                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                    group_items = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
                     items_group_list = [(group_val, group_items)] if group_items else []
-    
-            # For each group, enforce that if a supplier is awarded any volume, it must be at least min_volume.
             for group_val, items_group in items_group_list:
                 group_demand = sum(float(demand_data[j]) for j in items_group)
-                # (Optional debug: you can remove or log this)
                 print(f"Group: {items_group} | Total Demand: {group_demand} | Min Volume: {min_volume}")
-    
-                # If the minimum volume threshold exceeds the total demand, force infeasibility.
                 if min_volume > group_demand:
                     lp_problem += 0 >= 1, f"MinVol_Infeasible_{r_idx}_{group_val}"
                 else:
                     for s in suppliers:
                         x_sum = pulp.lpSum(x[(s, j)] for j in items_group)
-                        # Introduce a binary indicator y: y==1 means supplier s is active (i.e. gets >0 volume) in this group.
                         y = pulp.LpVariable(f"MinVol_{r_idx}_{s}_{group_val}", cat='Binary')
-                        # Lower bound: if y == 1 then x_sum must be at least min_volume.
                         lp_problem += x_sum >= min_volume - (1 - y) * M, f"MinVol_LB_{r_idx}_{s}_{group_val}"
-                        # Upper bound: if y == 0 then x_sum must be 0; if y==1 then x_sum can be up to group_demand.
                         lp_problem += x_sum <= group_demand * y, f"MinVol_UB_{r_idx}_{s}_{group_val}"
-
-
+    
         # "% Minimum Volume Awarded" rule.
         elif rule["rule_type"].strip().lower() == "% minimum volume awarded":
-            # Convert the rule input (e.g. "50%") to a fraction.
             try:
                 min_pct = float(rule["rule_input"].rstrip("%")) / 100.0
             except Exception as e:
                 st.error(f"Invalid rule input for % Minimum Volume Awarded: {e}")
                 continue
-
-            # Build groups over which the rule applies.
-            # If the grouping scope is "Apply to all items individually", then create one group per unique grouping value.
             if rule.get("grouping_scope", "").strip().lower() == "apply to all items individually":
                 if rule["grouping"].strip().lower() == "bid id":
                     unique_groups = sorted(list(item_attr_data.keys()))
                 else:
-                    unique_groups = sorted({
-                        str(item_attr_data[j].get(rule["grouping"], "")).strip()
-                        for j in items_dynamic
-                        if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""
-                    })
+                    unique_groups = sorted({str(item_attr_data[j].get(rule["grouping"], "")).strip() for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""})
                 group_list = []
                 for group_val in unique_groups:
                     if rule["grouping"].strip().lower() == "bid id":
                         group_list.append([group_val])
                     else:
-                        group_items = [j for j in items_dynamic
-                                       if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
+                        group_items = [j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == group_val]
                         if group_items:
                             group_list.append(group_items)
             else:
-                # Otherwise, use the provided grouping scope.
                 if rule["grouping"].strip().lower() == "all" or not rule.get("grouping_scope"):
                     group_list = [items_dynamic]
                 elif rule["grouping"].strip().lower() == "bid id":
                     group_list = [[str(rule["grouping_scope"]).strip()]]
                 else:
-                    group_list = [[j for j in items_dynamic
-                                   if str(item_attr_data[j].get(rule["grouping"], "")).strip() ==
-                                      str(rule["grouping_scope"]).strip()]]
-    
-            # For each group, enforce the minimum percentage volume rule.
+                    group_list = [[j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]]
             for group in group_list:
                 if not group:
                     continue
                 try:
-                    # Compute total demand (as a numeric value) for the group.
                     group_demand = sum(float(demand_data[j]) for j in group)
                 except Exception as e:
                     st.error(f"Error computing group demand: {e}")
                     continue
-
-                # (Optional debug output)
-                # st.write(f"Group: {group} | Total Demand: {group_demand} | Required Minimum: {min_pct * group_demand}")
-    
-                # Since for % Minimum Volume Awarded the supplier scope is locked to "All",
-                # we enforce the constraint for each supplier individually.
                 if rule.get("supplier_scope") in [None, "All"]:
                     for s in suppliers:
-                        # Create a binary indicator variable for supplier s in this group.
                         y = pulp.LpVariable(f"MinVolPct_{r_idx}_{s}_{hash(tuple(group))}", cat='Binary')
-                        # If y==1 then supplier s must receive at least min_pct*group_demand volume;
-                        # if y==0, then supplier s is awarded 0 volume in the group.
                         lp_problem += pulp.lpSum(x[(s, j)] for j in group) >= min_pct * group_demand * y, f"MinVolPct_LB_{r_idx}_{s}_{hash(tuple(group))}"
                         lp_problem += pulp.lpSum(x[(s, j)] for j in group) <= group_demand * y, f"MinVolPct_UB_{r_idx}_{s}_{hash(tuple(group))}"
                 else:
-                    # If a specific supplier is selected, apply the constraint only to that supplier.
                     s = rule["supplier_scope"]
                     lp_problem += pulp.lpSum(x[(s, j)] for j in group) >= min_pct * group_demand, f"MinVolPct_{r_idx}_{s}_{hash(tuple(group))}"
-
     
-    # Debug output.
+    #############################################
+    # DEBUG OUTPUT
+    #############################################
     constraint_names = list(lp_problem.constraints.keys())
     duplicates = set([n for n in constraint_names if constraint_names.count(n) > 1])
     if duplicates:
@@ -877,7 +790,9 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     else:
         feasibility_notes = "Model is optimal."
     
-    # Prepare results.
+    #############################################
+    # PREPARE RESULTS
+    #############################################
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     for idx, j in enumerate(items_dynamic, start=1):
