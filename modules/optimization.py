@@ -113,9 +113,14 @@ def df_to_dict_capacity(df):
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
         cap_scope = str(row["Capacity Scope"]).strip()
-        scope_value = str(row["Scope Value"]).strip()
+        # If the scope is "Bid ID", normalize the Scope Value.
+        if cap_scope == "Bid ID":
+            scope_value = normalize_bid_id(row["Scope Value"])
+        else:
+            scope_value = str(row["Scope Value"]).strip()
         d[(supplier, cap_scope, scope_value)] = row["Capacity"]
     return d
+
 
 def df_to_dict_tiers(df):
     """
