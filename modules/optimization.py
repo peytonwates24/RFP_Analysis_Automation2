@@ -26,6 +26,7 @@ REQUIRED_COLUMNS = {
 #############################################
 # Helper Functions for Excel Loading & Validation
 #############################################
+
 def load_excel_sheets(uploaded_file):
     """
     Load all sheets from an uploaded Excel file into a dictionary of DataFrames.
@@ -48,6 +49,18 @@ def validate_sheet(df, sheet_name):
 #############################################
 # Data Conversion Helper Functions
 #############################################
+def normalize_bid_id(bid):
+    try:
+        # Convert to float first in case bid is a numeric type.
+        num = float(bid)
+        # If the number is an integer, convert it to an integer to avoid a trailing .0
+        if num.is_integer():
+            return str(int(num))
+        else:
+            return str(num)
+    except Exception:
+        return str(bid).strip()
+
 def df_to_dict_item_attributes(df):
     """
     Convert the "Item Attributes" sheet into a dictionary keyed by Bid ID.
@@ -55,36 +68,31 @@ def df_to_dict_item_attributes(df):
     """
     d = {}
     for _, row in df.iterrows():
-        bid = str(row["Bid ID"]).strip()
+        bid = normalize_bid_id(row["Bid ID"])
         d[bid] = row.to_dict()
         d[bid].pop("Bid ID", None)
     return d
 
+
+
+def df_to_dict_demand(df):
+    d = {}
+    for _, row in df.iterrows():
+        bid = normalize_bid_id(row["Bid ID"])
+        d[bid] = row["Demand"]
+    return d
+
 def df_to_dict_price(df):
-    """
-    Convert the "Price" sheet into a dictionary keyed by (Supplier Name, Bid ID) with price values.
-    Rows with missing or zero Price are skipped.
-    """
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
-        bid = str(row["Bid ID"]).strip()
+        bid = normalize_bid_id(row["Bid ID"])
         price = row["Price"]
-        # Skip rows with missing or 0 price
         if pd.isna(price) or price == 0:
             continue
         d[(supplier, bid)] = price
     return d
 
-def df_to_dict_demand(df):
-    """
-    Convert the "Demand" sheet into a dictionary keyed by Bid ID with demand values.
-    """
-    d = {}
-    for _, row in df.iterrows():
-        bid = str(row["Bid ID"]).strip()
-        d[bid] = row["Demand"]
-    return d
 
 def df_to_dict_baseline_price(df):
     """
@@ -92,7 +100,7 @@ def df_to_dict_baseline_price(df):
     """
     d = {}
     for _, row in df.iterrows():
-        bid = str(row["Bid ID"]).strip()
+        bid = normalize_bid_id(row["Bid ID"])  # Use normalization here
         d[bid] = row["Baseline Price"]
     return d
 
@@ -132,7 +140,7 @@ def df_to_dict_supplier_bid_attributes(df):
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
-        bid = str(row["Bid ID"]).strip()
+        bid = normalize_bid_id(row["Bid ID"])  # Use normalization here
         attr = row.to_dict()
         attr.pop("Supplier Name", None)
         attr.pop("Bid ID", None)
@@ -318,26 +326,43 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         total_cap = sum(cap for ((sup, _, _), cap) in capacity_data.items() if sup == s)
         U_spend[s] = total_cap * max_price_val
     
-    # Discount tier constraints.
+
+    # Discount tiers
     z_discount = {}
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
-        z_discount[s] = {k: pulp.LpVariable(f"z_discount_{s}_{k}", cat='Binary') for k in range(len(tiers))}
-        lp_problem += pulp.lpSum(z_discount[s][k] for k in range(len(tiers))) == 1, f"DiscountTierSelect_{s}"
-    
-    # Rebate tier constraints.
+        if tiers:  # Only add tier variables and constraint if there are tiers
+            z_discount[s] = {k: pulp.LpVariable(f"z_discount_{s}_{k}", cat='Binary') for k in range(len(tiers))}
+            lp_problem += pulp.lpSum(z_discount[s][k] for k in range(len(tiers))) == 1, f"DiscountTierSelect_{s}"
+        else:
+            # No discount tiers for this supplier; assign an empty dictionary.
+            z_discount[s] = {}
+
+    # Rebate tiers
     y_rebate = {}
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
-        y_rebate[s] = {k: pulp.LpVariable(f"y_rebate_{s}_{k}", cat='Binary') for k in range(len(tiers))}
-        lp_problem += pulp.lpSum(y_rebate[s][k] for k in range(len(tiers))) == 1, f"RebateTierSelect_{s}"
-    
+        if tiers:  # Only add tier variables and constraint if there are tiers
+            y_rebate[s] = {k: pulp.LpVariable(f"y_rebate_{s}_{k}", cat='Binary') for k in range(len(tiers))}
+            lp_problem += pulp.lpSum(y_rebate[s][k] for k in range(len(tiers))) == 1, f"RebateTierSelect_{s}"
+        else:
+            y_rebate[s] = {}
+
+    # Define adjustment variables for discounts and rebates.
     d = {s: pulp.LpVariable(f"d_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     rebate_var = {s: pulp.LpVariable(f"rebate_{s}", lowBound=0, cat='Continuous') for s in suppliers}
-    
+
+    # FIX: For suppliers with no discount or rebate tiers, fix the adjustment variables to 0.
+    for s in suppliers:
+        if not discount_tiers.get(s, []):  # If no discount tiers are provided
+            lp_problem += d[s] == 0, f"Fix_d_{s}"
+        if not rebate_tiers.get(s, []):    # If no rebate tiers are provided
+            lp_problem += rebate_var[s] == 0, f"Fix_rebate_{s}"
+
+    # Now add the objective.
     lp_problem += pulp.lpSum(S[s] - rebate_var[s] for s in suppliers), "Total_Effective_Cost"
-    
-    # Discount Tiers constraints.
+
+    # Discount Tier constraints.
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
         M_discount = U_spend[s] if s in U_spend else M
@@ -349,14 +374,14 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[j].get(scope_attr) == scope_value)
             lp_problem += vol_expr >= Dmin * z_discount[s][k], f"DiscountTierMin_{s}_{k}"
             if Dmax < float('inf'):
-                lp_problem += vol_expr <= Dmax + M_discount*(1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
-            lp_problem += d[s] >= Dperc * S0[s] - M_discount*(1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
-            lp_problem += d[s] <= Dperc * S0[s] + M_discount*(1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
-    
+                lp_problem += vol_expr <= Dmax + M_discount * (1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
+            lp_problem += d[s] >= Dperc * S0[s] - M_discount * (1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
+            lp_problem += d[s] <= Dperc * S0[s] + M_discount * (1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
+
     for s in suppliers:
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
-    
-    # Rebate Tiers constraints.
+
+    # Rebate Tier constraints.
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
         M_rebate = U_spend[s] if s in U_spend else M
@@ -368,10 +393,10 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[j].get(scope_attr) == scope_value)
             lp_problem += vol_expr >= Rmin * y_rebate[s][k], f"RebateTierMin_{s}_{k}"
             if Rmax < float('inf'):
-                lp_problem += vol_expr <= Rmax + M_rebate*(1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
-            lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate*(1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
-            lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate*(1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
-    
+                lp_problem += vol_expr <= Rmax + M_rebate * (1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
+            lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate * (1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
+            lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate * (1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
+
     # Compute lowest cost suppliers per bid.
     lowest_cost_supplier = {}
     second_lowest_cost_supplier = {}
