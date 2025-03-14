@@ -113,27 +113,16 @@ def df_to_dict_tiers(df):
     """
     Convert a tiers sheet (either "Rebate Tiers" or "Discount Tiers") into a dictionary keyed by Supplier Name.
     Each value is a list of tuples: (Min, Max, Percentage, Scope Attribute, Scope Value)
-    Missing numeric values are replaced with defaults (0 for Min/Percentage, and float('inf') for Max).
     """
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
-        # Replace NaN values with defaults:
-        min_val = row["Min"] if not pd.isna(row["Min"]) else 0
-        max_val = row["Max"] if not pd.isna(row["Max"]) else float('inf')
-        percentage = row["Percentage"] if not pd.isna(row["Percentage"]) else 0
-        scope_attr = row.get("Scope Attribute")
-        scope_attr = scope_attr if (scope_attr is not None and not pd.isna(scope_attr)) else None
-        scope_value = row.get("Scope Value")
-        scope_value = scope_value if (scope_value is not None and not pd.isna(scope_value)) else None
-
-        tier = (min_val, max_val, percentage, scope_attr, scope_value)
+        tier = (row["Min"], row["Max"], row["Percentage"], row.get("Scope Attribute"), row.get("Scope Value"))
         if supplier in d:
             d[supplier].append(tier)
         else:
             d[supplier] = [tier]
     return d
-
 
 def df_to_dict_supplier_bid_attributes(df):
     """
