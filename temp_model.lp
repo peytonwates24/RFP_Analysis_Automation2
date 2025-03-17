@@ -109,26 +109,26 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
-Transition_10_A: - 13 T_10_A + x_A_10 <= 0
-Transition_10_B: - 13 T_10_B + x_B_10 <= 0
-Transition_1_B: x_B_1 <= 0
-Transition_1_C: x_C_1 <= 0
-Transition_2_A: - 9000 T_2_A + x_A_2 <= 0
-Transition_2_C: - 9000 T_2_C + x_C_2 <= 0
-Transition_3_A: - 600 T_3_A + x_A_3 <= 0
-Transition_3_B: - 600 T_3_B + x_B_3 <= 0
-Transition_4_A: - 5670 T_4_A + x_A_4 <= 0
-Transition_4_B: - 5670 T_4_B + x_B_4 <= 0
-Transition_5_A: - 45 T_5_A + x_A_5 <= 0
-Transition_5_B: - 45 T_5_B + x_B_5 <= 0
-Transition_6_A: - 242 T_6_A + x_A_6 <= 0
-Transition_6_B: - 242 T_6_B + x_B_6 <= 0
-Transition_7_A: - 664 T_7_A + x_A_7 <= 0
-Transition_7_B: - 664 T_7_B + x_B_7 <= 0
-Transition_8_A: - 24 T_8_A + x_A_8 <= 0
-Transition_8_B: - 24 T_8_B + x_B_8 <= 0
-Transition_9_A: - 232 T_9_A + x_A_9 <= 0
-Transition_9_B: - 232 T_9_B + x_B_9 <= 0
+Transition_lb_1: - 0.001 T_bid_1 + x_B_1 + x_C_1 >= 0
+Transition_lb_10: - 0.001 T_bid_10 + x_A_10 + x_B_10 >= 0
+Transition_lb_2: - 0.001 T_bid_2 + x_A_2 + x_C_2 >= 0
+Transition_lb_3: - 0.001 T_bid_3 + x_A_3 + x_B_3 >= 0
+Transition_lb_4: - 0.001 T_bid_4 + x_A_4 + x_B_4 >= 0
+Transition_lb_5: - 0.001 T_bid_5 + x_A_5 + x_B_5 >= 0
+Transition_lb_6: - 0.001 T_bid_6 + x_A_6 + x_B_6 >= 0
+Transition_lb_7: - 0.001 T_bid_7 + x_A_7 + x_B_7 >= 0
+Transition_lb_8: - 0.001 T_bid_8 + x_A_8 + x_B_8 >= 0
+Transition_lb_9: - 0.001 T_bid_9 + x_A_9 + x_B_9 >= 0
+Transition_ub_1: x_B_1 + x_C_1 <= 0
+Transition_ub_10: - 13 T_bid_10 + x_A_10 + x_B_10 <= 0
+Transition_ub_2: - 9000 T_bid_2 + x_A_2 + x_C_2 <= 0
+Transition_ub_3: - 600 T_bid_3 + x_A_3 + x_B_3 <= 0
+Transition_ub_4: - 5670 T_bid_4 + x_A_4 + x_B_4 <= 0
+Transition_ub_5: - 45 T_bid_5 + x_A_5 + x_B_5 <= 0
+Transition_ub_6: - 242 T_bid_6 + x_A_6 + x_B_6 <= 0
+Transition_ub_7: - 664 T_bid_7 + x_A_7 + x_B_7 <= 0
+Transition_ub_8: - 24 T_bid_8 + x_A_8 + x_B_8 <= 0
+Transition_ub_9: - 232 T_bid_9 + x_A_9 + x_B_9 <= 0
 Volume_A: V_A - x_A_1 - x_A_10 - x_A_2 - x_A_3 - x_A_4 - x_A_5 - x_A_6 - x_A_7
  - x_A_8 - x_A_9 = 0
 Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
@@ -136,24 +136,16 @@ Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
 Volume_C: V_C - x_C_1 - x_C_10 - x_C_2 - x_C_3 - x_C_4 - x_C_5 - x_C_6 - x_C_7
  - x_C_8 - x_C_9 = 0
 Binaries
-T_10_A
-T_10_B
-T_2_A
-T_2_C
-T_3_A
-T_3_B
-T_4_A
-T_4_B
-T_5_A
-T_5_B
-T_6_A
-T_6_B
-T_7_A
-T_7_B
-T_8_A
-T_8_B
-T_9_A
-T_9_B
+T_bid_1
+T_bid_10
+T_bid_2
+T_bid_3
+T_bid_4
+T_bid_5
+T_bid_6
+T_bid_7
+T_bid_8
+T_bid_9
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
