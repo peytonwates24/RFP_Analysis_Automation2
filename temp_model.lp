@@ -2,14 +2,12 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
-BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
- - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
-BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
- - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
-BaseSpend_C: S0_C - 55 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
- - 42 x_C_7 - 24 x_C_8 = 0
-BidExclusion_0_1_B: x_B_1 = 0
-BidExclusion_0_1_C: x_C_1 = 0
+BaseSpend_A: S0_A - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4 - 54 x_A_5
+ - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
+BaseSpend_B: S0_B - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4 - 34 x_B_5
+ - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
+BaseSpend_C: S0_C - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4 - 44 x_C_6
+ - 42 x_C_7 - 24 x_C_8 - 32 x_C_9 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
@@ -30,7 +28,7 @@ Capacity_C_Bid_ID_6: x_C_6 <= 100000000
 Capacity_C_Bid_ID_7: x_C_7 <= 100000000
 Capacity_C_Bid_ID_8: x_C_8 <= 100000000
 Capacity_C_Bid_ID_9: x_C_9 <= 100000000
-Demand_1: x_A_1 + x_B_1 + x_C_1 = 700
+Demand_1: x_A_1 + x_B_1 + x_C_1 = 0
 Demand_10: x_A_10 + x_B_10 + x_C_10 = 13
 Demand_2: x_A_2 + x_B_2 + x_C_2 = 9000
 Demand_3: x_A_3 + x_B_3 + x_C_3 = 600
@@ -76,9 +74,10 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
+NonBid_A_1: x_A_1 = 0
+NonBid_B_1: x_B_1 = 0
+NonBid_C_1: x_C_1 = 0
 NonBid_C_5: x_C_5 = 0
-NonBid_C_6: x_C_6 = 0
-NonBid_C_9: x_C_9 = 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
@@ -112,8 +111,8 @@ RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
-Transition_1_B: - 700 T_1_B + x_B_1 <= 0
-Transition_1_C: - 700 T_1_C + x_C_1 <= 0
+Transition_1_B: x_B_1 <= 0
+Transition_1_C: x_C_1 <= 0
 Transition_2_A: - 9000 T_2_A + x_A_2 <= 0
 Transition_2_C: - 9000 T_2_C + x_C_2 <= 0
 Transition_3_A: - 600 T_3_A + x_A_3 <= 0
@@ -139,8 +138,6 @@ Volume_C: V_C - x_C_1 - x_C_10 - x_C_2 - x_C_3 - x_C_4 - x_C_5 - x_C_6 - x_C_7
 Binaries
 T_10_A
 T_10_B
-T_1_B
-T_1_C
 T_2_A
 T_2_C
 T_3_A
