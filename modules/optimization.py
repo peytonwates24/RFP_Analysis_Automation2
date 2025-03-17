@@ -257,10 +257,17 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                       for (s, cs, sv), cap in capacity_data.items() }
     supplier_bid_attr_dict = {(s, normalize_bid_id(j)): attr for (s, j), attr in supplier_bid_attr_dict.items()}
     
-    # --- For each Bid ID in demand, if no supplier has provided a nonzero bid, set its demand to zero.
-    for bid in demand_data:
-        if not any(((s, bid) in price_data and price_data[(s, bid)] != 0) for s in suppliers):
+    # Rebuild dictionaries using the updated normalization
+    demand_data = {normalize_bid_id(k): v for k, v in demand_data.items()}
+    price_data = {(s, normalize_bid_id(j)): v for (s, j), v in price_data.items()}
+
+    # For each Bid ID in demand, if no supplier has a nonzero bid, set demand to zero.
+    for bid in list(demand_data.keys()):
+        # Use get() to default missing keys to 0
+        has_valid_bid = any(price_data.get((s, bid), 0) != 0 for s in suppliers)
+        if not has_valid_bid:
             demand_data[bid] = 0
+
 
     # --- Build list of Bid IDs from demand (keep all, even those with zero demand) ---
     items_dynamic = [normalize_bid_id(j) for j in demand_data.keys()]
