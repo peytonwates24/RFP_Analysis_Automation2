@@ -109,6 +109,9 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
+Rule_0: T_10_A + T_10_B + T_1_B + T_1_C + T_2_A + T_2_C + T_3_A + T_3_B
+ + T_4_A + T_4_B + T_5_A + T_5_B + T_6_A + T_6_B + T_7_A + T_7_B + T_8_A
+ + T_8_B + T_9_A + T_9_B = 4
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: x_B_1 <= 0
@@ -138,6 +141,8 @@ Volume_C: V_C - x_C_1 - x_C_10 - x_C_2 - x_C_3 - x_C_4 - x_C_5 - x_C_6 - x_C_7
 Binaries
 T_10_A
 T_10_B
+T_1_B
+T_1_C
 T_2_A
 T_2_C
 T_3_A

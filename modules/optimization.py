@@ -604,30 +604,51 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += x[(supplier_scope_value, j)] <= volume_target + M * (1 - y), f"MinVolAwarded_{r_idx}_{supplier_scope_value}_AtMost_{j}"
 
         # "# of transitions" rule.
-        elif rule["rule_type"] == "# of transitions":
-            if rule["grouping"] == "All" or not rule["grouping_scope"]:
+        elif rule["rule_type"].strip().lower() == "# of transitions":
+            # Determine the set of Bid IDs (items) to which the rule applies.
+            grouping = rule.get("grouping", "").strip().lower()
+            grouping_scope = rule.get("grouping_scope", "").strip().lower()
+
+            if grouping == "all" or not grouping_scope:
                 items_group = items_dynamic
-            elif rule["grouping_scope"] == "Apply to all items individually":
-                if rule["grouping"] == "Bid ID":
+            elif grouping_scope == "apply to all items individually":
+                if grouping == "bid id":
+                    # All bid IDs from the item attribute dictionary are already normalized.
                     items_group = sorted(list(item_attr_data.keys()))
                 else:
-                    items_group = sorted({str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip()
-                                           for j in item_attr_data if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() != ""})
+                    # Gather all nonempty grouping values from item_attr_data.
+                    items_group = sorted({
+                        str(item_attr_data[j].get(rule["grouping"], "")).strip().lower()
+                        for j in item_attr_data
+                        if str(item_attr_data[j].get(rule["grouping"], "")).strip() != ""
+                    })
             else:
-                items_group = [j for j in items_dynamic if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() == str(rule["grouping_scope"]).strip()]
+                # Apply the rule only to items matching the specified grouping_scope.
+                items_group = [
+                    j for j in items_dynamic
+                    if str(item_attr_data[j].get(rule["grouping"], "")).strip().lower() == grouping_scope
+                ]
+
+            # Convert rule input to an integer target.
             try:
                 transitions_target = int(rule["rule_input"])
-            except:
-                continue
-            operator = rule["operator"]
+            except (ValueError, TypeError):
+                continue  # Skip this rule if conversion fails
+
+            # Use a lowercase operator for comparison.
+            operator = rule.get("operator", "").strip().lower()
+
+            # Sum transitions for all (Bid ID, supplier) pairs where the Bid ID is in the determined group.
             total_transitions = pulp.lpSum(T[(j, s)] for (j, s) in T if j in items_group)
-            if operator == "At least":
+
+            # Add the appropriate constraint based on the operator.
+            if operator == "at least":
                 lp_problem += total_transitions >= transitions_target, f"Rule_{r_idx}"
-            elif operator == "At most":
+            elif operator == "at most":
                 lp_problem += total_transitions <= transitions_target, f"Rule_{r_idx}"
-            elif operator == "Exactly":
+            elif operator == "exactly":
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
-    
+
         # "Exclude Bids" rule.
         elif rule["rule_type"].strip().lower() == "exclude bids":
             if rule["grouping"] == "Bid ID":
