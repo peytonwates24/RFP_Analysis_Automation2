@@ -602,8 +602,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             elif operator == "Exactly":
                 lp_problem += total_transitions == transitions_target, f"Rule_{r_idx}"
     
-        # "Bid Exclusions" rule.
-        elif rule["rule_type"] == "Bid Exclusions":
+        # "Exclude Bids" rule.
+        elif rule["rule_type"].strip().lower() == "exclude bids":
             if rule["grouping"] == "Bid ID":
                 items_group = [rule["grouping_scope"]]
             elif rule["grouping"] == "All" or not rule["grouping_scope"]:
@@ -626,16 +626,22 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             threshold = float(rule["rule_input"])
                         except:
                             continue
-                        op = rule["operator"]
-                        if op == "At most" and bid_val_num > threshold:
-                            exclude = True
-                        elif op == "At least" and bid_val_num < threshold:
-                            exclude = True
-                        elif op == "Exactly" and bid_val_num != threshold:
-                            exclude = True
+                        op = rule["operator"].strip().lower()
+                        if op in ["greater than", ">"]:
+                            if bid_val_num > threshold:
+                                exclude = True
+                        elif op in ["less than", "<"]:
+                            if bid_val_num < threshold:
+                                exclude = True
+                        elif op in ["exactly", "=="]:
+                            if bid_val_num == threshold:
+                                exclude = True
+
                     else:
-                        if bid_val.strip() == rule.get("bid_exclusion_value", "").strip():
+                        # For textual data, do a case-insensitive comparison.
+                        if bid_val.strip().lower() == rule.get("bid_exclusion_value", "").strip().lower():
                             exclude = True
+
                     if exclude:
                         lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
     
