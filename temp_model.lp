@@ -8,6 +8,24 @@ BaseSpend_B: S0_B - 10 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
 BaseSpend_C: S0_C - 24 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
  - 44 x_C_6 - 42 x_C_7 - 24 x_C_8 - 32 x_C_9 = 0
+BidExclusion_0_10_B: x_B_10 = 0
+BidExclusion_0_10_C: x_C_10 = 0
+BidExclusion_0_2_B: x_B_2 = 0
+BidExclusion_0_2_C: x_C_2 = 0
+BidExclusion_0_3_B: x_B_3 = 0
+BidExclusion_0_3_C: x_C_3 = 0
+BidExclusion_0_4_B: x_B_4 = 0
+BidExclusion_0_4_C: x_C_4 = 0
+BidExclusion_0_5_B: x_B_5 = 0
+BidExclusion_0_5_C: x_C_5 = 0
+BidExclusion_0_6_B: x_B_6 = 0
+BidExclusion_0_6_C: x_C_6 = 0
+BidExclusion_0_7_B: x_B_7 = 0
+BidExclusion_0_7_C: x_C_7 = 0
+BidExclusion_0_8_B: x_B_8 = 0
+BidExclusion_0_8_C: x_C_8 = 0
+BidExclusion_0_9_B: x_B_9 = 0
+BidExclusion_0_9_C: x_C_9 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
@@ -74,7 +92,6 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-MinVolAwarded_0_Second_Lowest_Cost_Supplier_1_Exact: x_B_1 = 250
 NonBid_C_5: x_C_5 = 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1

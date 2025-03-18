@@ -476,28 +476,42 @@ def main():
                         grouping_scope = "All"
                 
                 # Supplier Scope handling.
-                if rule_type in ["# of Transitions", "# of Suppliers", "Exclude Bids"]:
+                if rule_type in ["# of Transitions", "# of Suppliers"]:
                     supplier_scope = "All"
                     st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
+                elif rule_type == "Exclude Bids":
+                    if "Price" in sheet_dfs:
+                        suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                    else:
+                        suppliers_auto = []
+                    # Enable the "All" option here.
+                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
                 elif rule_type in ["% of Volume Awarded", "# of Volume Awarded"]:
                     if "Price" in sheet_dfs:
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                     else:
                         suppliers_auto = []
-                    # Remove "All" from the options here.
+                    # Remove "All" from the options.
                     default_supplier_scope_options = suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
+                elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
+                    if "Price" in sheet_dfs:
+                        suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                    else:
+                        suppliers_auto = []
+                    # Enable the "All" option here.
+                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
                     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
                 else:
                     if "Price" in sheet_dfs:
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                     else:
                         suppliers_auto = []
-                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    default_supplier_scope_options = suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
                     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
                     if supplier_scope == "All":
                         supplier_scope = None
-
-
 
 
 
