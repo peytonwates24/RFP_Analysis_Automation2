@@ -658,7 +658,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         # "Exclude Bids" rule.
         elif rule["rule_type"].strip().lower() == "exclude bids":
             if rule["grouping"] == "Bid ID":
-                items_group = [rule["grouping_scope"]]
+                # Check if the grouping scope indicates to apply to all items individually.
+                if rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                    items_group = items_dynamic
+                else:
+                    items_group = [rule["grouping_scope"]]
             elif rule["grouping"] == "All" or not rule["grouping_scope"]:
                 items_group = items_dynamic
             else:
@@ -694,6 +698,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             exclude = True
                     if exclude:
                         lp_problem += x[(s, normalize_bid_id(j))] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
+
     
         # "Supplier Exclusion" rule.
         elif rule["rule_type"].strip().lower() == "supplier exclusion":
@@ -841,21 +846,73 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     if model_status == "Infeasible":
         feasibility_notes += "Model is infeasible. Likely causes include:\n"
         feasibility_notes += " - Insufficient supplier capacity relative to demand.\n"
-        feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n"
-        for j in items_dynamic:
-            cap_note = ""
-            for (s, cap_scope, scope_value), cap in capacity_data.items():
-                if cap_scope == "Bid ID" and scope_value == j:
-                    cap_note += f"Supplier {s} (Bid ID capacity): {cap}; "
-                elif cap_scope != "Bid ID" and str(item_attr_data[normalize_bid_id(j)].get(cap_scope, "")).strip() == str(scope_value).strip():
-                    cap_note += f"Supplier {s} ({cap_scope}={scope_value} capacity): {cap}; "
-            feasibility_notes += f"  Bid {j}: demand = {demand_data[normalize_bid_id(j)]}, capacities: {cap_note}\n"
-        feasibility_notes += "Please review supplier capacities, demand, and custom rule constraints."
+        feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n\n"
+        
+        # Detailed evaluation per custom rule:
+        feasibility_notes += "Detailed Rule Evaluations:\n"
+        for idx, rule in enumerate(rules):
+            r_type = rule.get("rule_type", "").strip().lower()
+            if r_type == "# of suppliers":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('# of Suppliers'): The required number of unique suppliers might be too high "
+                    "relative to the number of suppliers that have valid bids. If a grouping results in a subset with "
+                    "insufficient bidding suppliers, this rule cannot be met.\n"
+                )
+            elif r_type == "% of volume awarded":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('% of Volume Awarded'): The specified percentage allocation may be unattainable "
+                    "due to supplier capacity limitations or a low total bid volume in the grouping. Rigid percentage "
+                    "requirements (especially 'exactly') can lead to infeasibility if natural bid volumes differ.\n"
+                )
+            elif r_type == "# of volume awarded":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('# of Volume Awarded'): The target volume might exceed the available demand for "
+                    "the grouping or conflict with capacity constraints, making it impossible to allocate the required "
+                    "number of units.\n"
+                )
+            elif r_type == "# of transitions":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('# of Transitions'): The natural pattern of bids may not allow for the specified "
+                    "number of transitions (e.g. switching from the incumbent to another supplier). This is especially "
+                    "troublesome if most bids come from one supplier.\n"
+                )
+            elif r_type == "exclude bids":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('Exclude Bids'): The exclusion criteria might be too broad, removing all valid "
+                    "bids needed to satisfy demand for a Bid ID or grouping.\n"
+                )
+            elif r_type == "supplier exclusion":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('Supplier Exclusion'): Excluding a supplier that is the sole or one of very few "
+                    "bidders for a given Bid ID or grouping can leave no available bids to meet demand.\n"
+                )
+            elif r_type == "# minimum volume awarded":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('# Minimum Volume Awarded'): The minimum volume requirement may exceed the total "
+                    "demand available in the grouping or conflict with supplier capacity, making it impossible to meet.\n"
+                )
+            elif r_type == "% minimum volume awarded":
+                feasibility_notes += (
+                    f"Rule {idx+1} ('% Minimum Volume Awarded'): The percentage target for volume allocation might be set "
+                    "too high relative to the actual demand, causing the model to be unable to allocate sufficient volume.\n"
+                )
+            else:
+                feasibility_notes += (
+                    f"Rule {idx+1} ('{rule.get('rule_type', '')}'): Please review the parameters for potential conflicts "
+                    "with demand or capacity.\n"
+                )
+        
+        # Additional diagnostic information (e.g., Bid IDs with no valid bids)
+        no_bid_items = [bid for bid, d_val in demand_data.items() if d_val == 0]
+        if no_bid_items:
+            feasibility_notes += (
+                "\nNote: The following Bid ID(s) were excluded because no valid bids were found: " +
+                ", ".join(no_bid_items) + ".\n"
+            )
+        feasibility_notes += "\nPlease review supplier capacities, demand figures, and custom rule constraints for adjustments."
     else:
         feasibility_notes = "Model is optimal."
-    
-    if no_bid_items:
-        feasibility_notes += "\nNote: The following Bid ID(s) were excluded because no supplier bids were found: " + ", ".join(no_bid_items) + "."
+
     
     #############################################
     # PREPARE RESULTS
