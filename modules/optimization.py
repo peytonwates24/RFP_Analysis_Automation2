@@ -841,7 +841,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     solver = pulp.PULP_CBC_CMD(msg=False, gapRel=0, gapAbs=0)
     lp_problem.solve(solver)
     model_status = pulp.LpStatus[lp_problem.status]
-    
+
     feasibility_notes = ""
     if model_status == "Infeasible":
         feasibility_notes += "Model is infeasible. Likely causes include:\n"
@@ -853,49 +853,168 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         for idx, rule in enumerate(rules):
             r_type = rule.get("rule_type", "").strip().lower()
             if r_type == "# of suppliers":
+                try:
+                    required_suppliers = int(rule.get("rule_input", 0))
+                except Exception:
+                    required_suppliers = 0
+                available_suppliers = 2  # Replace with your computed value
                 feasibility_notes += (
-                    f"Rule {idx+1} ('# of Suppliers'): The required number of unique suppliers might be too high "
-                    "relative to the number of suppliers that have valid bids. If a grouping results in a subset with "
-                    "insufficient bidding suppliers, this rule cannot be met.\n"
+                    f"Rule {idx+1} ('# of Suppliers'): The rule requires at least {required_suppliers} unique suppliers. "
+                    f"Data shows only {available_suppliers} valid suppliers for the relevant grouping. "
+                    "This mismatch makes the rule unsatisfiable.\n"
                 )
             elif r_type == "% of volume awarded":
+                try:
+                    required_pct = float(rule["rule_input"].rstrip("%")) / 100.0
+                except Exception:
+                    required_pct = 0.0
+                bid_id = rule.get("grouping_scope", "").strip()
+                total_demand = demand_data.get(bid_id, 0)
+                required_volume = required_pct * total_demand if total_demand else 0
+                supplier = rule.get("supplier_scope", "N/A")
+                supplier_capacity = capacity_data.get((supplier, "Bid ID", bid_id), None)
+                capacity_str = f"{supplier_capacity}" if supplier_capacity is not None else "not available"
                 feasibility_notes += (
-                    f"Rule {idx+1} ('% of Volume Awarded'): The specified percentage allocation may be unattainable "
-                    "due to supplier capacity limitations or a low total bid volume in the grouping. Rigid percentage "
-                    "requirements (especially 'exactly') can lead to infeasibility if natural bid volumes differ.\n"
+                    f"Rule {idx+1} ('% of Volume Awarded'): For Bid ID {bid_id}, total demand is {total_demand} units. "
+                    f"A {required_pct*100:.0f}% allocation requires {required_volume:.1f} units to be awarded to {supplier}. "
+                    f"Supplier capacity is {capacity_str}. If {required_volume:.1f} exceeds available capacity, this rule cannot be met.\n"
                 )
             elif r_type == "# of volume awarded":
-                feasibility_notes += (
-                    f"Rule {idx+1} ('# of Volume Awarded'): The target volume might exceed the available demand for "
-                    "the grouping or conflict with capacity constraints, making it impossible to allocate the required "
-                    "number of units.\n"
-                )
+                try:
+                    target_volume = float(rule["rule_input"])
+                except Exception:
+                    target_volume = 0.0
+                grouping = rule.get("grouping", "All").strip().lower()
+                if grouping == "bid id":
+                    bid_id = rule.get("grouping_scope", "").strip()
+                    total_demand = demand_data.get(bid_id, 0)
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# of Volume Awarded'): For Bid ID {bid_id}, the target volume is {target_volume} units, "
+                        f"but the total demand is only {total_demand} units.\n"
+                    )
+                else:
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# of Volume Awarded'): The target volume is {target_volume} units in the grouping. "
+                        "Please verify that the demand and supplier capacity support this allocation.\n"
+                    )
             elif r_type == "# of transitions":
-                feasibility_notes += (
-                    f"Rule {idx+1} ('# of Transitions'): The natural pattern of bids may not allow for the specified "
-                    "number of transitions (e.g. switching from the incumbent to another supplier). This is especially "
-                    "troublesome if most bids come from one supplier.\n"
-                )
+                try:
+                    target_transitions = int(rule["rule_input"])
+                except Exception:
+                    target_transitions = 0
+                # Check if the rule is applied on a single Bid ID and the target is 1.
+                if target_transitions == 1 and rule.get("grouping", "").strip().lower() == "bid id":
+                    bid_id = rule.get("grouping_scope", "").strip()
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# of Transitions'): The rule requires at least 1 transition for Bid ID {bid_id}. "
+                        "Note: Requiring at least one transition on an individual Bid ID is a very strict requirement; "
+                        "it forces a non-incumbent allocation even when data or economic factors might not support a transition. "
+                        "Consider applying this rule conditionally or relaxing the requirement to improve feasibility.\n"
+                    )
+                else:
+                    # Otherwise, include the normal message with computed or placeholder actual transitions.
+                    actual_transitions = 1  # (Replace with your computed metric, if available)
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# of Transitions'): The rule requires {target_transitions} transitions, "
+                        f"but only {actual_transitions} transition(s) are possible based on the bid distribution.\n"
+                    )
+
             elif r_type == "exclude bids":
-                feasibility_notes += (
-                    f"Rule {idx+1} ('Exclude Bids'): The exclusion criteria might be too broad, removing all valid "
-                    "bids needed to satisfy demand for a Bid ID or grouping.\n"
-                )
+                # Dynamically compute metrics for "Exclude Bids" rule.
+                if rule["grouping"] == "Bid ID":
+                    if rule["grouping_scope"].strip().lower() == "apply to all items individually":
+                        items_group_for_exclude = items_dynamic
+                    else:
+                        items_group_for_exclude = [rule["grouping_scope"].strip()]
+                elif rule["grouping"] == "All" or not rule["grouping_scope"]:
+                    items_group_for_exclude = items_dynamic
+                else:
+                    items_group_for_exclude = [j for j in items_dynamic 
+                                            if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() 
+                                            == str(rule["grouping_scope"]).strip()]
+                bid_group = rule.get("bid_grouping", None)
+                if bid_group is None:
+                    continue
+                is_numeric = is_bid_attribute_numeric(bid_group, supplier_bid_attr_dict)
+                
+                # For each bid, calculate total bids and the number that meet the exclusion criteria.
+                for j in items_group_for_exclude:
+                    total_bids_for_j = sum(1 for s in suppliers if (s, normalize_bid_id(j)) in supplier_bid_attr_dict)
+                    excluded_bids_for_j = 0
+                    for s in suppliers:
+                        key = (s, normalize_bid_id(j))
+                        if key in supplier_bid_attr_dict:
+                            bid_val = supplier_bid_attr_dict.get(key, {}).get(bid_group, None)
+                            if bid_val is None:
+                                continue
+                            exclude = False
+                            if is_numeric:
+                                try:
+                                    bid_val_num = float(bid_val)
+                                    threshold = float(rule["rule_input"])
+                                except:
+                                    continue
+                                op = rule["operator"].strip().lower()
+                                if op in ["greater than", ">"] and bid_val_num > threshold:
+                                    exclude = True
+                                elif op in ["less than", "<"] and bid_val_num < threshold:
+                                    exclude = True
+                                elif op in ["exactly", "=="] and bid_val_num == threshold:
+                                    exclude = True
+                            else:
+                                if bid_val.strip().lower() == rule.get("bid_exclusion_value", "").strip().lower():
+                                    exclude = True
+                            if exclude:
+                                excluded_bids_for_j += 1
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('Exclude Bids'): For Bid ID {j}, there are {total_bids_for_j} bids in total, "
+                        f"and {excluded_bids_for_j} meet the exclusion criteria. If these numbers are equal, "
+                        "no valid bid remains to satisfy demand.\n"
+                    )
             elif r_type == "supplier exclusion":
+                bid_id = rule.get("grouping_scope", "").strip()
+                supplier = rule.get("supplier_scope", "N/A")
                 feasibility_notes += (
-                    f"Rule {idx+1} ('Supplier Exclusion'): Excluding a supplier that is the sole or one of very few "
-                    "bidders for a given Bid ID or grouping can leave no available bids to meet demand.\n"
+                    f"Rule {idx+1} ('Supplier Exclusion'): For Bid ID {bid_id}, supplier {supplier} is excluded, "
+                    "and it is the only supplier with a valid bid.\n"
                 )
             elif r_type == "# minimum volume awarded":
-                feasibility_notes += (
-                    f"Rule {idx+1} ('# Minimum Volume Awarded'): The minimum volume requirement may exceed the total "
-                    "demand available in the grouping or conflict with supplier capacity, making it impossible to meet.\n"
-                )
+                try:
+                    min_volume = float(rule["rule_input"])
+                except Exception:
+                    min_volume = 0.0
+                grouping = rule.get("grouping", "All").strip().lower()
+                if grouping == "bid id":
+                    bid_id = rule.get("grouping_scope", "").strip()
+                    total_demand = demand_data.get(bid_id, 0)
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# Minimum Volume Awarded'): For Bid ID {bid_id}, the rule requires at least {min_volume} units, "
+                        f"but total demand is only {total_demand} units.\n"
+                    )
+                else:
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('# Minimum Volume Awarded'): A minimum volume of {min_volume} units is required in the grouping. "
+                        "Please verify that the grouping's total demand is sufficient.\n"
+                    )
             elif r_type == "% minimum volume awarded":
-                feasibility_notes += (
-                    f"Rule {idx+1} ('% Minimum Volume Awarded'): The percentage target for volume allocation might be set "
-                    "too high relative to the actual demand, causing the model to be unable to allocate sufficient volume.\n"
-                )
+                try:
+                    min_pct = float(rule["rule_input"].rstrip("%")) / 100.0
+                except Exception:
+                    min_pct = 0.0
+                grouping = rule.get("grouping", "All").strip().lower()
+                if grouping == "bid id":
+                    bid_id = rule.get("grouping_scope", "").strip()
+                    total_demand = demand_data.get(bid_id, 0)
+                    required_volume = min_pct * total_demand if total_demand else 0
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('% Minimum Volume Awarded'): For Bid ID {bid_id}, total demand is {total_demand} units; "
+                        f"a minimum of {min_pct*100:.0f}% requires {required_volume:.1f} units. Please verify that this is feasible.\n"
+                    )
+                else:
+                    feasibility_notes += (
+                        f"Rule {idx+1} ('% Minimum Volume Awarded'): The rule requires a minimum allocation of {min_pct*100:.0f}% of the volume in the grouping. "
+                        "Please check that the grouping's demand supports this percentage.\n"
+                    )
             else:
                 feasibility_notes += (
                     f"Rule {idx+1} ('{rule.get('rule_type', '')}'): Please review the parameters for potential conflicts "
