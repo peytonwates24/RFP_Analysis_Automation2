@@ -702,44 +702,55 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     
         # "Supplier Exclusion" rule.
         elif rule["rule_type"].strip().lower() == "supplier exclusion":
-            # When grouping is "All" (or grouping_scope is not provided), include all bids.
-            if rule["grouping"].strip().lower() == "all" or not rule["grouping_scope"]:
+            # Determine the list of Bid IDs (bids_in_group) based on grouping and grouping scope.
+            grouping = rule.get("grouping", "").strip().lower()
+            grouping_scope = rule.get("grouping_scope", "").strip().lower()
+            if grouping == "bid id":
+                if grouping_scope == "apply to all items individually":
+                    bids_in_group = items_dynamic  # Use all Bid IDs.
+                else:
+                    bids_in_group = [rule["grouping_scope"].strip()]
+            elif grouping == "all" or not rule.get("grouping_scope"):
                 bids_in_group = items_dynamic
             else:
-                # If grouping is specified and is not "All":
-                if rule["grouping"].strip().lower() == "bid id":
-                    bids_in_group = [rule["grouping_scope"].strip()]
-                else:
-                    bids_in_group = [
-                        j for j in items_dynamic 
-                        if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() ==
-                        str(rule["grouping_scope"]).strip()
-                    ]
+                bids_in_group = [
+                    j for j in items_dynamic 
+                    if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip().lower() == grouping_scope
+                ]
             
-            # Determine the supplier scope (convert to lowercase for comparisons).
-            s_scope = rule["supplier_scope"].strip().lower() if rule["supplier_scope"] else None
+            # Determine the supplier scope (converted to lowercase).
+            s_scope = rule.get("supplier_scope", "").strip().lower() if rule.get("supplier_scope") else None
 
             if s_scope == "lowest cost supplier":
-                for j in bids_in_group:
-                    lp_problem += x[(lowest_cost_supplier[j], normalize_bid_id(j))] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                for bid in bids_in_group:
+                    lp_problem += x[(lowest_cost_supplier[bid], normalize_bid_id(bid))] == 0, f"SupplierExclusion_{bid}"
             elif s_scope == "second lowest cost supplier":
-                for j in bids_in_group:
-                    lp_problem += x[(second_lowest_cost_supplier[j], normalize_bid_id(j))] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                for bid in bids_in_group:
+                    lp_problem += x[(second_lowest_cost_supplier[bid], normalize_bid_id(bid))] == 0, f"SupplierExclusion_{bid}"
             elif s_scope == "incumbent":
-                for j in bids_in_group:
-                    incumbent = item_attr_data[normalize_bid_id(j)].get("Incumbent")
+                # Exclude the incumbent's bid (if that's the intended behavior for this rule).
+                for bid in bids_in_group:
+                    incumbent = item_attr_data[normalize_bid_id(bid)].get("Incumbent")
                     if incumbent:
-                        lp_problem += x[(incumbent, normalize_bid_id(j))] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                        lp_problem += x[(incumbent, normalize_bid_id(bid))] == 0, f"SupplierExclusion_{bid}"
             elif s_scope == "new suppliers":
-                for j in bids_in_group:
-                    incumbent = item_attr_data[normalize_bid_id(j)].get("Incumbent")
+                # Exclude new suppliers: for each bid, force allocations from non-incumbents to zero
+                # and force the incumbent to cover the full demand.
+                for bid in bids_in_group:
+                    incumbent = item_attr_data[normalize_bid_id(bid)].get("Incumbent")
+                    if not incumbent:
+                        # If no incumbent exists, skip or handle appropriately.
+                        continue
                     for s in suppliers:
                         if s != incumbent:
-                            lp_problem += x[(s, normalize_bid_id(j))] == 0, f"SupplierExclusion_{r_idx}_{j}_{s}"
+                            lp_problem += x[(s, normalize_bid_id(bid))] == 0, f"SupplierExclusion_{bid}_{s}"
+                    bid_demand = demand_data.get(normalize_bid_id(bid), 0)
+                    lp_problem += x[(incumbent, normalize_bid_id(bid))] == bid_demand, f"SupplierExclusion_Full_{bid}"
             else:
-                # For a specific supplier (e.g., "C") not matching any of the special cases.
-                for j in bids_in_group:
-                    lp_problem += x[(rule["supplier_scope"], normalize_bid_id(j))] == 0, f"SupplierExclusion_{r_idx}_{j}"
+                # For a specific supplier name (e.g., "C") that doesn't match any special cases.
+                for bid in bids_in_group:
+                    lp_problem += x[(rule["supplier_scope"], normalize_bid_id(bid))] == 0, f"SupplierExclusion_{bid}"
+
 
     
         # "# Minimum Volume Awarded" rule.
@@ -921,11 +932,12 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
 
             elif r_type == "exclude bids":
                 # Dynamically compute metrics for "Exclude Bids" rule.
-                if rule["grouping"] == "Bid ID":
+                if rule["grouping"].strip().lower() == "bid id":
                     if rule["grouping_scope"].strip().lower() == "apply to all items individually":
-                        items_group_for_exclude = items_dynamic
+                        bids_in_group = items_dynamic
                     else:
-                        items_group_for_exclude = [rule["grouping_scope"].strip()]
+                        bids_in_group = [rule["grouping_scope"].strip()]
+
                 elif rule["grouping"] == "All" or not rule["grouping_scope"]:
                     items_group_for_exclude = items_dynamic
                 else:
