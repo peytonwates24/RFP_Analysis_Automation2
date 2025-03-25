@@ -193,7 +193,6 @@ def main():
 
     # Display content based on the current section
     section = st.session_state.current_section
-
     if section == 'home':
         st.write("Welcome to the Scourcing COE Analysis Tool.")
 
