@@ -415,6 +415,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     # CUSTOM RULES PROCESSING
     #############################################
     # (Below is the full custom rules processing code as in your original implementation.)
+
     for r_idx, rule in enumerate(rules):
         # "# of suppliers" rule.
         if rule["rule_type"].lower() == "# of suppliers":
@@ -1088,7 +1089,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             )
         feasibility_notes += "\nPlease review supplier capacities, demand figures, and custom rule constraints for adjustments."
     else:
-        feasibility_notes = "Model is optimal."
+        feasibility_notes = "Model is optimal!"
 
     
     #############################################
