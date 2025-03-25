@@ -1095,6 +1095,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     #############################################
     # PREPARE RESULTS
     #############################################
+    
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     for idx, j in enumerate(items_dynamic, start=1):
