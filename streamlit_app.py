@@ -486,9 +486,9 @@ def main():
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                     else:
                         suppliers_auto = []
-                    # Remove "All" from the options.
-                    default_supplier_scope_options = suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
                     supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
+
                 elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
                     if "Price" in sheet_dfs:
                         suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
