@@ -74,6 +74,36 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
+Link_Y_lower_10_A: - T_10_A + Y_10 >= 0
+Link_Y_lower_10_B: - T_10_B + Y_10 >= 0
+Link_Y_lower_1_B: - T_1_B + Y_1 >= 0
+Link_Y_lower_1_C: - T_1_C + Y_1 >= 0
+Link_Y_lower_2_A: - T_2_A + Y_2 >= 0
+Link_Y_lower_2_C: - T_2_C + Y_2 >= 0
+Link_Y_lower_3_A: - T_3_A + Y_3 >= 0
+Link_Y_lower_3_B: - T_3_B + Y_3 >= 0
+Link_Y_lower_4_A: - T_4_A + Y_4 >= 0
+Link_Y_lower_4_B: - T_4_B + Y_4 >= 0
+Link_Y_lower_5_A: - T_5_A + Y_5 >= 0
+Link_Y_lower_5_B: - T_5_B + Y_5 >= 0
+Link_Y_lower_6_A: - T_6_A + Y_6 >= 0
+Link_Y_lower_6_B: - T_6_B + Y_6 >= 0
+Link_Y_lower_7_A: - T_7_A + Y_7 >= 0
+Link_Y_lower_7_B: - T_7_B + Y_7 >= 0
+Link_Y_lower_8_A: - T_8_A + Y_8 >= 0
+Link_Y_lower_8_B: - T_8_B + Y_8 >= 0
+Link_Y_lower_9_A: - T_9_A + Y_9 >= 0
+Link_Y_lower_9_B: - T_9_B + Y_9 >= 0
+Link_Y_upper_1: - T_1_B - T_1_C + Y_1 <= 0
+Link_Y_upper_10: - T_10_A - T_10_B + Y_10 <= 0
+Link_Y_upper_2: - T_2_A - T_2_C + Y_2 <= 0
+Link_Y_upper_3: - T_3_A - T_3_B + Y_3 <= 0
+Link_Y_upper_4: - T_4_A - T_4_B + Y_4 <= 0
+Link_Y_upper_5: - T_5_A - T_5_B + Y_5 <= 0
+Link_Y_upper_6: - T_6_A - T_6_B + Y_6 <= 0
+Link_Y_upper_7: - T_7_A - T_7_B + Y_7 <= 0
+Link_Y_upper_8: - T_8_A - T_8_B + Y_8 <= 0
+Link_Y_upper_9: - T_9_A - T_9_B + Y_9 <= 0
 NonBid_C_5: x_C_5 = 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
@@ -106,13 +136,7 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
-SupplIndicatorLB_0_A_5: - w_0_A_5 + x_A_5 >= 0
-SupplIndicatorLB_0_B_5: - w_0_B_5 + x_B_5 >= 0
-SupplIndicatorLB_0_C_5: - w_0_C_5 + x_C_5 >= 0
-SupplIndicator_0_A_5: - 1000000000 w_0_A_5 + x_A_5 <= 0
-SupplIndicator_0_B_5: - 1000000000 w_0_B_5 + x_B_5 <= 0
-SupplIndicator_0_C_5: - 1000000000 w_0_C_5 + x_C_5 <= 0
-SupplierCount_0_5: w_0_A_5 + w_0_B_5 + w_0_C_5 >= 2
+TransRule_0: Y_1 + Y_10 + Y_2 + Y_3 + Y_4 + Y_5 + Y_6 + Y_7 + Y_8 + Y_9 = 5
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -133,15 +157,6 @@ Transition_8_A: - 24 T_8_A + x_A_8 <= 0
 Transition_8_B: - 24 T_8_B + x_B_8 <= 0
 Transition_9_A: - 232 T_9_A + x_A_9 <= 0
 Transition_9_B: - 232 T_9_B + x_B_9 <= 0
-VolRule_1_A_5_LB: - 1000000000 w_vol_1_A_5 + x_A_5 >= -999999980
-VolRule_1_B_5_LB: - 1000000000 w_vol_1_B_5 + x_B_5 >= -999999980
-VolRule_1_C_5_LB: - 1000000000 w_vol_1_C_5 + x_C_5 >= -999999980
-VolSupplIndicatorLB_1_A_5: - w_vol_1_A_5 + x_A_5 >= 0
-VolSupplIndicatorLB_1_B_5: - w_vol_1_B_5 + x_B_5 >= 0
-VolSupplIndicatorLB_1_C_5: - w_vol_1_C_5 + x_C_5 >= 0
-VolSupplIndicator_1_A_5: - 1000000000 w_vol_1_A_5 + x_A_5 <= 0
-VolSupplIndicator_1_B_5: - 1000000000 w_vol_1_B_5 + x_B_5 <= 0
-VolSupplIndicator_1_C_5: - 1000000000 w_vol_1_C_5 + x_C_5 <= 0
 Volume_A: V_A - x_A_1 - x_A_10 - x_A_2 - x_A_3 - x_A_4 - x_A_5 - x_A_6 - x_A_7
  - x_A_8 - x_A_9 = 0
 Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
@@ -169,12 +184,16 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
-w_0_A_5
-w_0_B_5
-w_0_C_5
-w_vol_1_A_5
-w_vol_1_B_5
-w_vol_1_C_5
+Y_1
+Y_10
+Y_2
+Y_3
+Y_4
+Y_5
+Y_6
+Y_7
+Y_8
+Y_9
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
