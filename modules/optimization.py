@@ -393,6 +393,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
 
     
+
     # --- Rebate Tier constraints ---
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
@@ -420,7 +421,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 lp_problem += vol_expr <= Rmax + M_rebate * (1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
             lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate * (1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
             lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate * (1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
-
     
     # --- Compute lowest cost suppliers per bid ---
     lowest_cost_supplier = {}
@@ -1224,7 +1224,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             )
         feasibility_notes += "\nPlease review supplier capacities, demand figures, and custom rule constraints for adjustments."
     else:
-        feasibility_notes = "Model is optimal."
+        feasibility_notes = "Model is optimal!"
 
     
     #############################################
