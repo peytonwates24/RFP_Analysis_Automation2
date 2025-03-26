@@ -2110,8 +2110,8 @@ def main():
                     st.session_state.selected_subfolder = subfolder
 
         else:
-            st.error("No project selected.")
-            logger.error("No project selected.")
+            st.error("No project selected..")
+            logger.error("No project selected..")
 
 
     elif section == 'upload database':
