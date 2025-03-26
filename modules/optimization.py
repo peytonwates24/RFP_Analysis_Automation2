@@ -1224,7 +1224,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             )
         feasibility_notes += "\nPlease review supplier capacities, demand figures, and custom rule constraints for adjustments."
     else:
-        feasibility_notes = "Model is optimal!"
+        feasibility_notes = "Model is optimal."
 
     
     #############################################
