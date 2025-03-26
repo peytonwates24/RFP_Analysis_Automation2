@@ -367,18 +367,31 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         M_discount = U_spend[s] if s in U_spend else M
         for k, tier in enumerate(tiers):
             Dmin, Dmax, Dperc, scope_attr, scope_value = tier
-            if scope_attr is None or scope_value is None:
+
+            # Convert scope values to strings to safely call .strip()
+            scope_attr_str = str(scope_attr) if scope_attr is not None else ""
+            scope_value_str = str(scope_value) if scope_value is not None else ""
+
+            # If either scope attribute or scope value is blank or equals "ALL" (ignoring case),
+            # then the volume expression aggregates over all bid IDs.
+            if (not scope_attr_str.strip()) or (scope_attr_str.strip().upper() == "ALL") \
+            or (not scope_value_str.strip()) or (scope_value_str.strip().upper() == "ALL"):
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value)
+                vol_expr = pulp.lpSum(
+                    x[(s, j)] 
+                    for j in items_dynamic 
+                    if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value
+                )
             lp_problem += vol_expr >= Dmin * z_discount[s][k], f"DiscountTierMin_{s}_{k}"
             if Dmax < float('inf'):
                 lp_problem += vol_expr <= Dmax + M_discount * (1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
             lp_problem += d[s] >= Dperc * S0[s] - M_discount * (1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
             lp_problem += d[s] <= Dperc * S0[s] + M_discount * (1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
-    
+            
     for s in suppliers:
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
+
     
     # --- Rebate Tier constraints ---
     for s in suppliers:
@@ -386,15 +399,28 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         M_rebate = U_spend[s] if s in U_spend else M
         for k, tier in enumerate(tiers):
             Rmin, Rmax, Rperc, scope_attr, scope_value = tier
-            if scope_attr is None or scope_value is None:
+
+            # Convert scope values to strings (if they exist) so we can safely call .strip()
+            scope_attr_str = str(scope_attr) if scope_attr is not None else ""
+            scope_value_str = str(scope_value) if scope_value is not None else ""
+
+            # If either scope attribute or scope value is blank or equals "ALL" (ignoring case),
+            # then aggregate over all bid IDs.
+            if (not scope_attr_str.strip()) or (scope_attr_str.strip().upper() == "ALL") \
+            or (not scope_value_str.strip()) or (scope_value_str.strip().upper() == "ALL"):
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value)
+                vol_expr = pulp.lpSum(
+                    x[(s, j)]
+                    for j in items_dynamic
+                    if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value
+                )
             lp_problem += vol_expr >= Rmin * y_rebate[s][k], f"RebateTierMin_{s}_{k}"
             if Rmax < float('inf'):
                 lp_problem += vol_expr <= Rmax + M_rebate * (1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
             lp_problem += rebate_var[s] >= Rperc * S[s] - M_rebate * (1 - y_rebate[s][k]), f"RebateTierLower_{s}_{k}"
             lp_problem += rebate_var[s] <= Rperc * S[s] + M_rebate * (1 - y_rebate[s][k]), f"RebateTierUpper_{s}_{k}"
+
     
     # --- Compute lowest cost suppliers per bid ---
     lowest_cost_supplier = {}
