@@ -108,44 +108,72 @@ RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
 SupplIndicatorLB_0_A_1: - w_0_A_1 + x_A_1 >= 0
 SupplIndicatorLB_0_A_10: - w_0_A_10 + x_A_10 >= 0
+SupplIndicatorLB_0_A_2: - w_0_A_2 + x_A_2 >= 0
 SupplIndicatorLB_0_A_3: - w_0_A_3 + x_A_3 >= 0
 SupplIndicatorLB_0_A_4: - w_0_A_4 + x_A_4 >= 0
+SupplIndicatorLB_0_A_5: - w_0_A_5 + x_A_5 >= 0
+SupplIndicatorLB_0_A_6: - w_0_A_6 + x_A_6 >= 0
+SupplIndicatorLB_0_A_7: - w_0_A_7 + x_A_7 >= 0
 SupplIndicatorLB_0_A_8: - w_0_A_8 + x_A_8 >= 0
 SupplIndicatorLB_0_A_9: - w_0_A_9 + x_A_9 >= 0
 SupplIndicatorLB_0_B_1: - w_0_B_1 + x_B_1 >= 0
 SupplIndicatorLB_0_B_10: - w_0_B_10 + x_B_10 >= 0
+SupplIndicatorLB_0_B_2: - w_0_B_2 + x_B_2 >= 0
 SupplIndicatorLB_0_B_3: - w_0_B_3 + x_B_3 >= 0
 SupplIndicatorLB_0_B_4: - w_0_B_4 + x_B_4 >= 0
+SupplIndicatorLB_0_B_5: - w_0_B_5 + x_B_5 >= 0
+SupplIndicatorLB_0_B_6: - w_0_B_6 + x_B_6 >= 0
+SupplIndicatorLB_0_B_7: - w_0_B_7 + x_B_7 >= 0
 SupplIndicatorLB_0_B_8: - w_0_B_8 + x_B_8 >= 0
 SupplIndicatorLB_0_B_9: - w_0_B_9 + x_B_9 >= 0
 SupplIndicatorLB_0_C_1: - w_0_C_1 + x_C_1 >= 0
 SupplIndicatorLB_0_C_10: - w_0_C_10 + x_C_10 >= 0
+SupplIndicatorLB_0_C_2: - w_0_C_2 + x_C_2 >= 0
 SupplIndicatorLB_0_C_3: - w_0_C_3 + x_C_3 >= 0
 SupplIndicatorLB_0_C_4: - w_0_C_4 + x_C_4 >= 0
+SupplIndicatorLB_0_C_5: - w_0_C_5 + x_C_5 >= 0
+SupplIndicatorLB_0_C_6: - w_0_C_6 + x_C_6 >= 0
+SupplIndicatorLB_0_C_7: - w_0_C_7 + x_C_7 >= 0
 SupplIndicatorLB_0_C_8: - w_0_C_8 + x_C_8 >= 0
 SupplIndicatorLB_0_C_9: - w_0_C_9 + x_C_9 >= 0
 SupplIndicator_0_A_1: - 1000000000 w_0_A_1 + x_A_1 <= 0
 SupplIndicator_0_A_10: - 1000000000 w_0_A_10 + x_A_10 <= 0
+SupplIndicator_0_A_2: - 1000000000 w_0_A_2 + x_A_2 <= 0
 SupplIndicator_0_A_3: - 1000000000 w_0_A_3 + x_A_3 <= 0
 SupplIndicator_0_A_4: - 1000000000 w_0_A_4 + x_A_4 <= 0
+SupplIndicator_0_A_5: - 1000000000 w_0_A_5 + x_A_5 <= 0
+SupplIndicator_0_A_6: - 1000000000 w_0_A_6 + x_A_6 <= 0
+SupplIndicator_0_A_7: - 1000000000 w_0_A_7 + x_A_7 <= 0
 SupplIndicator_0_A_8: - 1000000000 w_0_A_8 + x_A_8 <= 0
 SupplIndicator_0_A_9: - 1000000000 w_0_A_9 + x_A_9 <= 0
 SupplIndicator_0_B_1: - 1000000000 w_0_B_1 + x_B_1 <= 0
 SupplIndicator_0_B_10: - 1000000000 w_0_B_10 + x_B_10 <= 0
+SupplIndicator_0_B_2: - 1000000000 w_0_B_2 + x_B_2 <= 0
 SupplIndicator_0_B_3: - 1000000000 w_0_B_3 + x_B_3 <= 0
 SupplIndicator_0_B_4: - 1000000000 w_0_B_4 + x_B_4 <= 0
+SupplIndicator_0_B_5: - 1000000000 w_0_B_5 + x_B_5 <= 0
+SupplIndicator_0_B_6: - 1000000000 w_0_B_6 + x_B_6 <= 0
+SupplIndicator_0_B_7: - 1000000000 w_0_B_7 + x_B_7 <= 0
 SupplIndicator_0_B_8: - 1000000000 w_0_B_8 + x_B_8 <= 0
 SupplIndicator_0_B_9: - 1000000000 w_0_B_9 + x_B_9 <= 0
 SupplIndicator_0_C_1: - 1000000000 w_0_C_1 + x_C_1 <= 0
 SupplIndicator_0_C_10: - 1000000000 w_0_C_10 + x_C_10 <= 0
+SupplIndicator_0_C_2: - 1000000000 w_0_C_2 + x_C_2 <= 0
 SupplIndicator_0_C_3: - 1000000000 w_0_C_3 + x_C_3 <= 0
 SupplIndicator_0_C_4: - 1000000000 w_0_C_4 + x_C_4 <= 0
+SupplIndicator_0_C_5: - 1000000000 w_0_C_5 + x_C_5 <= 0
+SupplIndicator_0_C_6: - 1000000000 w_0_C_6 + x_C_6 <= 0
+SupplIndicator_0_C_7: - 1000000000 w_0_C_7 + x_C_7 <= 0
 SupplIndicator_0_C_8: - 1000000000 w_0_C_8 + x_C_8 <= 0
 SupplIndicator_0_C_9: - 1000000000 w_0_C_9 + x_C_9 <= 0
 SupplierCount_0_1: w_0_A_1 + w_0_B_1 + w_0_C_1 >= 2
 SupplierCount_0_10: w_0_A_10 + w_0_B_10 + w_0_C_10 >= 2
+SupplierCount_0_2: w_0_A_2 + w_0_B_2 + w_0_C_2 >= 2
 SupplierCount_0_3: w_0_A_3 + w_0_B_3 + w_0_C_3 >= 2
 SupplierCount_0_4: w_0_A_4 + w_0_B_4 + w_0_C_4 >= 2
+SupplierCount_0_5: w_0_A_5 + w_0_B_5 + w_0_C_5 >= 2
+SupplierCount_0_6: w_0_A_6 + w_0_B_6 + w_0_C_6 >= 2
+SupplierCount_0_7: w_0_A_7 + w_0_B_7 + w_0_C_7 >= 2
 SupplierCount_0_8: w_0_A_8 + w_0_B_8 + w_0_C_8 >= 2
 SupplierCount_0_9: w_0_A_9 + w_0_B_9 + w_0_C_9 >= 2
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
@@ -197,20 +225,32 @@ T_9_A
 T_9_B
 w_0_A_1
 w_0_A_10
+w_0_A_2
 w_0_A_3
 w_0_A_4
+w_0_A_5
+w_0_A_6
+w_0_A_7
 w_0_A_8
 w_0_A_9
 w_0_B_1
 w_0_B_10
+w_0_B_2
 w_0_B_3
 w_0_B_4
+w_0_B_5
+w_0_B_6
+w_0_B_7
 w_0_B_8
 w_0_B_9
 w_0_C_1
 w_0_C_10
+w_0_C_2
 w_0_C_3
 w_0_C_4
+w_0_C_5
+w_0_C_6
+w_0_C_7
 w_0_C_8
 w_0_C_9
 y_rebate_A_0

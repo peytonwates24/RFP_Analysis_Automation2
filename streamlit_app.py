@@ -326,7 +326,7 @@ def main():
                     "Rule Type", 
                     options=[
                         "% of Volume Awarded", "# of Volume Awarded", "# of Transitions", "# of Suppliers", 
-                        "Supplier Exclusion", "Exclude Bids", "% Minimum Volume Awarded", "# Minimum Volume Awarded"
+                        "Supplier Exclusion", "Exclude Bids"
                     ],
                     key="rule_type_select"
                 )
