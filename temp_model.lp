@@ -8,7 +8,6 @@ BaseSpend_B: S0_B - 10 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
 BaseSpend_C: S0_C - 24 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
  - 44 x_C_6 - 42 x_C_7 - 24 x_C_8 - 32 x_C_9 = 0
-BidExclusion_0_2_B: x_B_2 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
@@ -121,6 +120,12 @@ RebateTierUpper_B_1: - 0.15 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
+Rule_0_aggregate: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3 - 0.3 x_A_4
+ - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9 - 0.3 x_B_1
+ - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5 - 0.3 x_B_6
+ - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 + 0.7 x_C_1 + 0.7 x_C_10 + 0.7 x_C_2
+ + 0.7 x_C_3 + 0.7 x_C_4 + 0.7 x_C_5 + 0.7 x_C_6 + 0.7 x_C_7 + 0.7 x_C_8
+ + 0.7 x_C_9 >= 0
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
