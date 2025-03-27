@@ -8,6 +8,7 @@ BaseSpend_B: S0_B - 10 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
  - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
 BaseSpend_C: S0_C - 24 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
  - 44 x_C_6 - 42 x_C_7 - 24 x_C_8 - 32 x_C_9 = 0
+BidExclusion_0_2_B: x_B_2 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
