@@ -2,12 +2,36 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
-BaseSpend_A: S0_A - 0.5252 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
+%VolAwarded_Agg_0_A_UB: 0.7 x_A_1 + 0.7 x_A_10 + 0.7 x_A_2 + 0.7 x_A_3
+ + 0.7 x_A_4 + 0.7 x_A_5 + 0.7 x_A_6 + 0.7 x_A_7 + 0.7 x_A_8 + 0.7 x_A_9
+ - 0.3 x_B_1 - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5
+ - 0.3 x_B_6 - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 - 0.3 x_C_1 - 0.3 x_C_10
+ - 0.3 x_C_2 - 0.3 x_C_3 - 0.3 x_C_4 - 0.3 x_C_5 - 0.3 x_C_6 - 0.3 x_C_7
+ - 0.3 x_C_8 - 0.3 x_C_9 + 1000000000 y_0_A <= 1000000000
+%VolAwarded_Agg_0_B_UB: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3
+ - 0.3 x_A_4 - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9
+ + 0.7 x_B_1 + 0.7 x_B_10 + 0.7 x_B_2 + 0.7 x_B_3 + 0.7 x_B_4 + 0.7 x_B_5
+ + 0.7 x_B_6 + 0.7 x_B_7 + 0.7 x_B_8 + 0.7 x_B_9 - 0.3 x_C_1 - 0.3 x_C_10
+ - 0.3 x_C_2 - 0.3 x_C_3 - 0.3 x_C_4 - 0.3 x_C_5 - 0.3 x_C_6 - 0.3 x_C_7
+ - 0.3 x_C_8 - 0.3 x_C_9 + 1000000000 y_0_B <= 1000000000
+%VolAwarded_Agg_0_C_UB: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3
+ - 0.3 x_A_4 - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9
+ - 0.3 x_B_1 - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5
+ - 0.3 x_B_6 - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 + 0.7 x_C_1 + 0.7 x_C_10
+ + 0.7 x_C_2 + 0.7 x_C_3 + 0.7 x_C_4 + 0.7 x_C_5 + 0.7 x_C_6 + 0.7 x_C_7
+ + 0.7 x_C_8 + 0.7 x_C_9 + 1000000000 y_0_C <= 1000000000
+Active_0_A: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7
+ + x_A_8 + x_A_9 - 1000000000 y_0_A <= 0
+Active_0_B: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7
+ + x_B_8 + x_B_9 - 1000000000 y_0_B <= 0
+Active_0_C: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7
+ + x_C_8 + x_C_9 - 1000000000 y_0_C <= 0
+BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
  - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
-BaseSpend_B: S0_B - 10 x_B_1 - 13 x_B_10 - 70 x_B_2 - 65 x_B_3 - 75 x_B_4
- - 34 x_B_5 - 24 x_B_6 - 85 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
-BaseSpend_C: S0_C - 24 x_C_1 - 15 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
- - 44 x_C_6 - 42 x_C_7 - 24 x_C_8 - 32 x_C_9 = 0
+BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 80 x_B_2 - 65 x_B_3 - 75 x_B_4
+ - 34 x_B_5 - 24 x_B_6 - 53 x_B_7 - 13 x_B_8 - 56 x_B_9 = 0
+BaseSpend_C: S0_C - 55 x_C_1 - 75 x_C_10 - 75 x_C_2 - 60 x_C_3 - 24 x_C_4
+ - 24 x_C_5 - 64 x_C_6 - 86 x_C_7 - 24 x_C_8 - 13 x_C_9 = 0
 Capacity_B_Bid_ID_1: x_B_1 <= 100000000
 Capacity_B_Bid_ID_10: x_B_10 <= 100000000
 Capacity_B_Bid_ID_2: x_B_2 <= 100000000
@@ -80,12 +104,17 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-NonBid_C_5: x_C_5 = 0
+MinActive_0_A: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7
+ + x_A_8 + x_A_9 - 0.001 y_0_A >= 0
+MinActive_0_B: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7
+ + x_B_8 + x_B_9 - 0.001 y_0_B >= 0
+MinActive_0_C: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7
+ + x_C_8 + x_C_9 - 0.001 y_0_C >= 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
-RebateTierLower_A_1: - 0.09 S_A + rebate_A - 19400000000 y_rebate_A_1
+RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
 RebateTierLower_B_0: rebate_B - 97000000000 y_rebate_B_0 >= -97000000000
-RebateTierLower_B_1: - 0.15 S_B + rebate_B - 97000000000 y_rebate_B_1
+RebateTierLower_B_1: - 0.05 S_B + rebate_B - 97000000000 y_rebate_B_1
  >= -97000000000
 RebateTierLower_C_0: rebate_C - 97000000000 y_rebate_C_0 >= -97000000000
 RebateTierLower_C_1: - 0.07 S_C + rebate_C - 97000000000 y_rebate_C_1
@@ -93,7 +122,7 @@ RebateTierLower_C_1: - 0.07 S_C + rebate_C - 97000000000 y_rebate_C_1
 RebateTierMax_A_0: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6
  + x_A_7 + x_A_8 + x_A_9 + 19400000000 y_rebate_A_0 <= 19400000500
 RebateTierMax_B_0: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6
- + x_B_7 + x_B_8 + x_B_9 + 97000000000 y_rebate_B_0 <= 97000000300
+ + x_B_7 + x_B_8 + x_B_9 + 97000000000 y_rebate_B_0 <= 97000000500
 RebateTierMax_C_0: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6
  + x_C_7 + x_C_8 + x_C_9 + 97000000000 y_rebate_C_0 <= 97000000700
 RebateTierMin_A_0: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6
@@ -102,8 +131,8 @@ RebateTierMin_A_1: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6
  + x_A_7 + x_A_8 + x_A_9 - 500 y_rebate_A_1 >= 0
 RebateTierMin_B_0: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6
  + x_B_7 + x_B_8 + x_B_9 >= 0
-RebateTierMin_B_1: x_B_1 + x_B_10 + x_B_3 + x_B_4 + x_B_8 + x_B_9
- - 500 y_rebate_B_1 >= 0
+RebateTierMin_B_1: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6
+ + x_B_7 + x_B_8 + x_B_9 - 500 y_rebate_B_1 >= 0
 RebateTierMin_C_0: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6
  + x_C_7 + x_C_8 + x_C_9 >= 0
 RebateTierMin_C_1: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6
@@ -112,20 +141,14 @@ RebateTierSelect_A: y_rebate_A_0 + y_rebate_A_1 = 1
 RebateTierSelect_B: y_rebate_B_0 + y_rebate_B_1 = 1
 RebateTierSelect_C: y_rebate_C_0 + y_rebate_C_1 = 1
 RebateTierUpper_A_0: rebate_A + 19400000000 y_rebate_A_0 <= 19400000000
-RebateTierUpper_A_1: - 0.09 S_A + rebate_A + 19400000000 y_rebate_A_1
+RebateTierUpper_A_1: - 0.1 S_A + rebate_A + 19400000000 y_rebate_A_1
  <= 19400000000
 RebateTierUpper_B_0: rebate_B + 97000000000 y_rebate_B_0 <= 97000000000
-RebateTierUpper_B_1: - 0.15 S_B + rebate_B + 97000000000 y_rebate_B_1
+RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
  <= 97000000000
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
-Rule_0_aggregate: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3 - 0.3 x_A_4
- - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9 - 0.3 x_B_1
- - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5 - 0.3 x_B_6
- - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 + 0.7 x_C_1 + 0.7 x_C_10 + 0.7 x_C_2
- + 0.7 x_C_3 + 0.7 x_C_4 + 0.7 x_C_5 + 0.7 x_C_6 + 0.7 x_C_7 + 0.7 x_C_8
- + 0.7 x_C_9 >= 0
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -173,6 +196,9 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
+y_0_A
+y_0_B
+y_0_C
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
