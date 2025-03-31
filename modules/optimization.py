@@ -5,8 +5,8 @@ import streamlit as st
 
 # Global constant for Big-M constraints.
 M = 1e9
-# Tolerance for per-bid constraints (if needed)
-TOL = 0.000
+# Set tolerance; note that EPS=0.0 now to avoid activating on negligible volumes.
+EPS = 0.0
 
 #############################################
 # REQUIRED COLUMNS for Excel Validation
@@ -125,29 +125,23 @@ def rule_to_text(rule):
     grouping = rule.get("grouping", "").strip()
     grouping_scope = rule.get("grouping_scope", "").strip()
     supplier_scope = rule.get("supplier_scope", "").strip()
-    
-    if grouping.upper() == "ALL" or not grouping:
-        grouping_text = "ALL Groupings"
-    else:
-        grouping_text = grouping
-
-    if not grouping_scope or grouping_scope.upper() == "ALL":
-        grouping_scope_text = "ALL Groupings"
-    else:
-        grouping_scope_text = grouping_scope
-
     rule_type = rule.get("rule_type", "").lower()
-
     if rule_type == "% of volume awarded":
         if grouping.upper() == "ALL":
             return f"{operator} {rule_input}% of ALL Groupings is awarded to {supplier_scope}."
         else:
-            return f"{operator} {rule_input}% of {grouping} in {grouping_scope_text} is awarded to {supplier_scope}."
+            return f"{operator} {rule_input}% of {grouping_scope} (by {grouping}) is awarded to {supplier_scope}."
     elif rule_type == "# of volume awarded":
         if grouping.upper() == "ALL":
             return f"{operator} {rule_input} units awarded across ALL items to {supplier_scope}."
         else:
-            return f"{operator} {rule_input} units awarded in {grouping_scope_text} of {grouping} to {supplier_scope}."
+            return f"{operator} {rule_input} units awarded in {grouping_scope} (by {grouping}) to {supplier_scope}."
+    elif rule_type == "# of transitions":
+        if grouping.upper() == "ALL" or not grouping_scope:
+            group_text = "all items"
+        else:
+            group_text = grouping_scope
+        return f"# Transitions: {operator} {rule_input} transitions in {group_text}."
     else:
         return str(rule)
 
@@ -216,7 +210,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     # --- Define no_bid_items as those with zero demand ---
     no_bid_items = [bid for bid, d_val in demand_data.items() if d_val == 0]
 
-    # --- Create transition variables ---
+    # --- Create transition variables for non-incumbent awards ---
     T = {}
     for j in items_dynamic:
         incumbent = item_attr_data[normalize_bid_id(j)].get("Incumbent")
@@ -233,9 +227,16 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     S = {s: pulp.LpVariable(f"S_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     V = {s: pulp.LpVariable(f"V_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     
+    # --- Global Minimum Award Constraint: if any volume is awarded to supplier s then total must be >= 1 ---
+    z = {s: pulp.LpVariable(f"z_{s}", cat='Binary') for s in suppliers}
+    for s in suppliers:
+        lp_problem += pulp.lpSum(x[(s, j)] for j in items_dynamic) >= 1 * z[s], f"MinAward_{s}"
+        for j in items_dynamic:
+            lp_problem += x[(s, j)] <= M * z[s], f"ActiveLink_{s}_{j}"
+    
     # --- Demand constraints ---
     for j in items_dynamic:
-        lp_problem += pulp.lpSum(x[(s, j)] for s in suppliers) == demand_data[normalize_bid_id(j)], f"Demand_{j}"
+        lp_problem += pulp.lpSum(x[(s, j)] for s in suppliers) == demand_data[j], f"Demand_{j}"
     
     # --- Non-bid constraints ---
     for s in suppliers:
@@ -246,8 +247,10 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     # --- Transition constraints ---
     for j in items_dynamic:
         for s in suppliers:
-            if (j, s) in T:
-                lp_problem += x[(s, j)] <= demand_data[normalize_bid_id(j)] * T[(j, s)], f"Transition_{j}_{s}"
+            incumbent = item_attr_data[normalize_bid_id(j)].get("Incumbent")
+            if s != incumbent:
+                lp_problem += x[(s, j)] <= demand_data[j] * T[(j, s)], f"Transition_{j}_{s}"
+                lp_problem += x[(s, j)] >= EPS * T[(j, s)], f"TransitionLower_{j}_{s}"
     
     # --- Capacity constraints ---
     for (s, cap_scope, scope_value), cap in capacity_data.items():
@@ -312,7 +315,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
                 vol_expr = pulp.lpSum(
-                    x[(s, j)] 
+                    x[(s, j)]
                     for j in items_dynamic 
                     if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value
                 )
@@ -390,7 +393,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 continue
 
         # --------------------------------------------------------------------------
-        # Revised "% of Volume Awarded" rule.
+        # Revised "% of Volume Awarded" rule (unchanged from previous version)
         elif rule["rule_type"].lower() == "% of volume awarded":
             try:
                 percentage = float(rule["rule_input"].rstrip("%")) / 100.0
@@ -400,7 +403,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             scope = rule["supplier_scope"].strip().lower()
             operator = rule["operator"].strip().lower()
 
-            # Determine grouping:
             if rule["grouping"].strip().upper() == "ALL":
                 group_items = items_dynamic
             elif rule["grouping"].strip().lower() == "bid id":
@@ -430,9 +432,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     for s in suppliers:
                         vol_s = pulp.lpSum(x[(s, j)] for j in group_items)
                         y_s = pulp.LpVariable(f"y_{r_idx}_{s}", cat='Binary')
-                        epsilon = 1e-3
                         lp_problem += vol_s <= M * y_s, f"Active_{r_idx}_{s}"
-                        lp_problem += vol_s >= epsilon * y_s, f"MinActive_{r_idx}_{s}"
+                        lp_problem += vol_s >= EPS * y_s, f"MinActive_{r_idx}_{s}"
                         if operator == "at least":
                             lp_problem += vol_s >= percentage * aggregated_total - M*(1 - y_s), f"%VolAwarded_Agg_{r_idx}_{s}_LB"
                         elif operator == "at most":
@@ -471,9 +472,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     elif scope == "all":
                         for s in suppliers:
                             w_var = pulp.LpVariable(f"w_%Vol_{r_idx}_{s}_{j}", cat='Binary')
-                            epsilon = 1e-3
                             lp_problem += x[(s, j)] <= M * w_var, f"%VolAwarded_{r_idx}_{s}_{j}_Indicator_UB"
-                            lp_problem += x[(s, j)] >= epsilon * w_var, f"%VolAwarded_{r_idx}_{s}_{j}_Indicator_LB"
+                            lp_problem += x[(s, j)] >= EPS * w_var, f"%VolAwarded_{r_idx}_{s}_{j}_Indicator_LB"
                             if operator == "at least":
                                 lp_problem += x[(s, j)] >= percentage * total_vol - M * (1 - w_var), f"%VolAwarded_{r_idx}_{s}_{j}_LB"
                             elif operator == "at most":
@@ -494,7 +494,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += lhs <= percentage * total_vol, f"%VolAwarded_{r_idx}_{j}_EQ_UB"
                         
         # --------------------------------------------------------------------------
-        # NEW: Revised "# of Volume Awarded" rule.
+        # New branch: Revised "# of Volume Awarded" rule.
         elif rule["rule_type"].lower() == "# of volume awarded":
             try:
                 volume_target = float(rule["rule_input"])
@@ -504,7 +504,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             scope = rule["supplier_scope"].strip().lower()
             operator = rule["operator"].strip().lower()
 
-            # Determine grouping:
             if rule["grouping"].strip().upper() == "ALL":
                 group_items = items_dynamic
             elif rule["grouping"].strip().lower() == "bid id":
@@ -514,7 +513,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 group_items = [j for j in items_dynamic
                                if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() == group_val]
 
-            # Aggregated formulation: if grouping is ALL or the group contains more than one bid.
             if rule["grouping"].strip().upper() == "ALL" or len(group_items) > 1:
                 if scope == "incumbent":
                     aggregated_vol = pulp.lpSum(
@@ -531,13 +529,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 elif scope == "second lowest cost supplier":
                     aggregated_vol = pulp.lpSum(x[(second_lowest_cost_supplier[j], j)] for j in group_items)
                 elif scope == "all":
-                    # For "All", enforce the rule for every supplier individually.
                     for s in suppliers:
                         vol_s = pulp.lpSum(x[(s, j)] for j in group_items)
                         y_s = pulp.LpVariable(f"y_vol_{r_idx}_{s}", cat='Binary')
-                        epsilon = 1e-3
                         lp_problem += vol_s <= M * y_s, f"VolActive_{r_idx}_{s}"
-                        lp_problem += vol_s >= epsilon * y_s, f"VolMinActive_{r_idx}_{s}"
+                        lp_problem += vol_s >= EPS * y_s, f"VolMinActive_{r_idx}_{s}"
                         if operator == "at least":
                             lp_problem += vol_s >= volume_target - M*(1 - y_s), f"VolAwarded_Agg_{r_idx}_{s}_LB"
                         elif operator == "at most":
@@ -557,7 +553,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     lp_problem += aggregated_vol >= volume_target, f"VolAwarded_Agg_{r_idx}_{scope}_EQ_LB"
                     lp_problem += aggregated_vol <= volume_target, f"VolAwarded_Agg_{r_idx}_{scope}_EQ_UB"
             else:
-                # For a single bid, apply constraint per bid.
                 for j in group_items:
                     if scope == "lowest cost supplier":
                         supplier_for_rule = lowest_cost_supplier[j]
@@ -576,9 +571,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     elif scope == "all":
                         for s in suppliers:
                             w_var = pulp.LpVariable(f"w_vol_{r_idx}_{s}_{j}", cat='Binary')
-                            epsilon = 1e-3
                             lp_problem += x[(s, j)] <= M * w_var, f"VolAwarded_{r_idx}_{s}_{j}_Indicator_UB"
-                            lp_problem += x[(s, j)] >= epsilon * w_var, f"VolAwarded_{r_idx}_{s}_{j}_Indicator_LB"
+                            lp_problem += x[(s, j)] >= EPS * w_var, f"VolAwarded_{r_idx}_{s}_{j}_Indicator_LB"
                             if operator == "at least":
                                 lp_problem += x[(s, j)] >= volume_target - M*(1 - w_var), f"VolAwarded_{r_idx}_{s}_{j}_LB"
                             elif operator == "at most":
@@ -598,7 +592,33 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += lhs >= volume_target, f"VolAwarded_{r_idx}_{j}_EQ_LB"
                         lp_problem += lhs <= volume_target, f"VolAwarded_{r_idx}_{j}_EQ_UB"
 
-        # Other custom rule branches remain unchanged...
+        # --------------------------------------------------------------------------
+        # New branch: Revised "# of Transitions" rule.
+        elif rule["rule_type"].lower() == "# of transitions":
+            try:
+                transitions_target = int(rule["rule_input"])
+            except Exception:
+                continue
+            operator = rule["operator"].strip().lower()
+            # For transitions, supplier scope is not applicable.
+            if rule["grouping"].strip().upper() == "ALL":
+                group_items = items_dynamic
+            elif rule["grouping"].strip().lower() == "bid id":
+                group_items = [normalize_bid_id(rule["grouping_scope"].strip())]
+            else:
+                group_val = rule["grouping_scope"].strip()
+                group_items = [j for j in items_dynamic
+                               if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip() == group_val]
+            total_transitions = pulp.lpSum(
+                T[(j, s)] for j in group_items for s in suppliers
+                if s != item_attr_data[normalize_bid_id(j)].get("Incumbent")
+            )
+            if operator == "at least":
+                lp_problem += total_transitions >= transitions_target, f"Transitions_{r_idx}_LB"
+            elif operator == "at most":
+                lp_problem += total_transitions <= transitions_target, f"Transitions_{r_idx}_UB"
+            elif operator == "exactly":
+                lp_problem += total_transitions == transitions_target, f"Transitions_{r_idx}_EQ"
     
     #############################################
     # DEBUG OUTPUT
@@ -635,58 +655,17 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     if str(item_attr_data[normalize_bid_id(j)].get(rule["grouping"], "")).strip().lower() == grouping_scope
                 ]
             r_type = rule.get("rule_type", "").strip().lower()
-            if r_type == "# of suppliers":
+            if r_type == "# of transitions":
                 try:
-                    required_suppliers = int(rule.get("rule_input", 0))
+                    required_trans = int(rule["rule_input"])
                 except Exception:
-                    required_suppliers = 0
-                for bid in bid_ids:
-                    available_suppliers = 2  # Placeholder for actual computation.
-                    emoji = "✅" if available_suppliers >= required_suppliers else "❌"
-                    feasibility_notes += (
-                        f"Rule {idx+1} ('# of Suppliers'): {emoji} For Bid ID {bid}, required suppliers: {required_suppliers}, "
-                        f"available: {available_suppliers}.\n"
-                    )
-            elif r_type == "% of volume awarded":
-                try:
-                    required_pct = float(rule["rule_input"].rstrip("%")) / 100.0
-                except Exception:
-                    required_pct = 0.0
-                for bid in bid_ids:
-                    norm_bid = normalize_bid_id(bid)
-                    total_demand = demand_data.get(norm_bid, 0)
-                    required_volume = required_pct * total_demand if total_demand else 0
-                    emoji = "✅"
-                    if rule["supplier_scope"].strip().lower() == "incumbent":
-                        incumbent = item_attr_data.get(norm_bid, {}).get("Incumbent")
-                        if not incumbent or (incumbent, norm_bid) not in price_data:
-                            emoji = "❌"
-                            feasibility_notes += (
-                                f"Rule {idx+1} ('% of Volume Awarded'): {emoji} For Bid ID {bid}, incumbent issue.\n"
-                            )
-                            continue
-                    feasibility_notes += (
-                        f"Rule {idx+1} ('% of Volume Awarded'): {emoji} For Bid ID {bid}, total demand: {total_demand} units; "
-                        f"a {required_pct*100:.0f}% allocation requires {required_volume:.1f} units for {rule['supplier_scope']}.\n"
-                    )
-            elif r_type == "# of volume awarded":
-                try:
-                    vol_target = float(rule["rule_input"])
-                except Exception:
-                    vol_target = 0.0
-                for bid in bid_ids:
-                    norm_bid = normalize_bid_id(bid)
-                    total_demand = demand_data.get(norm_bid, 0)
-                    emoji = "✅" if vol_target <= total_demand else "❌"
-                    feasibility_notes += (
-                        f"Rule {idx+1} ('# of Volume Awarded'): {emoji} For Bid ID {bid}, total demand: {total_demand} units; "
-                        f"a target volume of {vol_target:.1f} units is specified for {rule['supplier_scope']}.\n"
-                    )
-            else:
-                emoji = "❌"
+                    required_trans = 0
                 feasibility_notes += (
-                    f"Rule {idx+1} ('{rule.get('rule_type', '')}'): {emoji} Please review the parameters.\n"
+                    f"Rule {idx+1} ('# of Transitions'): For group {grouping_scope if grouping_scope else 'ALL'}, "
+                    f"required transitions: {required_trans}.\n"
                 )
+            else:
+                feasibility_notes += f"Rule {idx+1} ('{rule.get('rule_type', '')}'): Please review the parameters.\n"
         no_bid_items = [bid for bid, d_val in demand_data.items() if d_val == 0]
         if no_bid_items:
             feasibility_notes += (

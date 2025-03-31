@@ -2,6 +2,36 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
+ActiveLink_A_1: x_A_1 - 1000000000 z_A <= 0
+ActiveLink_A_10: x_A_10 - 1000000000 z_A <= 0
+ActiveLink_A_2: x_A_2 - 1000000000 z_A <= 0
+ActiveLink_A_3: x_A_3 - 1000000000 z_A <= 0
+ActiveLink_A_4: x_A_4 - 1000000000 z_A <= 0
+ActiveLink_A_5: x_A_5 - 1000000000 z_A <= 0
+ActiveLink_A_6: x_A_6 - 1000000000 z_A <= 0
+ActiveLink_A_7: x_A_7 - 1000000000 z_A <= 0
+ActiveLink_A_8: x_A_8 - 1000000000 z_A <= 0
+ActiveLink_A_9: x_A_9 - 1000000000 z_A <= 0
+ActiveLink_B_1: x_B_1 - 1000000000 z_B <= 0
+ActiveLink_B_10: x_B_10 - 1000000000 z_B <= 0
+ActiveLink_B_2: x_B_2 - 1000000000 z_B <= 0
+ActiveLink_B_3: x_B_3 - 1000000000 z_B <= 0
+ActiveLink_B_4: x_B_4 - 1000000000 z_B <= 0
+ActiveLink_B_5: x_B_5 - 1000000000 z_B <= 0
+ActiveLink_B_6: x_B_6 - 1000000000 z_B <= 0
+ActiveLink_B_7: x_B_7 - 1000000000 z_B <= 0
+ActiveLink_B_8: x_B_8 - 1000000000 z_B <= 0
+ActiveLink_B_9: x_B_9 - 1000000000 z_B <= 0
+ActiveLink_C_1: x_C_1 - 1000000000 z_C <= 0
+ActiveLink_C_10: x_C_10 - 1000000000 z_C <= 0
+ActiveLink_C_2: x_C_2 - 1000000000 z_C <= 0
+ActiveLink_C_3: x_C_3 - 1000000000 z_C <= 0
+ActiveLink_C_4: x_C_4 - 1000000000 z_C <= 0
+ActiveLink_C_5: x_C_5 - 1000000000 z_C <= 0
+ActiveLink_C_6: x_C_6 - 1000000000 z_C <= 0
+ActiveLink_C_7: x_C_7 - 1000000000 z_C <= 0
+ActiveLink_C_8: x_C_8 - 1000000000 z_C <= 0
+ActiveLink_C_9: x_C_9 - 1000000000 z_C <= 0
 BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
  - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
 BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 80 x_B_2 - 65 x_B_3 - 75 x_B_4
@@ -80,6 +110,12 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
+MinAward_A: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7
+ + x_A_8 + x_A_9 - z_A >= 0
+MinAward_B: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7
+ + x_B_8 + x_B_9 - z_B >= 0
+MinAward_C: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7
+ + x_C_8 + x_C_9 - z_C >= 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
@@ -119,6 +155,26 @@ RebateTierUpper_B_1: - 0.05 S_B + rebate_B + 97000000000 y_rebate_B_1
 RebateTierUpper_C_0: rebate_C + 97000000000 y_rebate_C_0 <= 97000000000
 RebateTierUpper_C_1: - 0.07 S_C + rebate_C + 97000000000 y_rebate_C_1
  <= 97000000000
+TransitionLower_10_A: x_A_10 >= 0
+TransitionLower_10_B: x_B_10 >= 0
+TransitionLower_1_B: x_B_1 >= 0
+TransitionLower_1_C: x_C_1 >= 0
+TransitionLower_2_A: x_A_2 >= 0
+TransitionLower_2_C: x_C_2 >= 0
+TransitionLower_3_A: x_A_3 >= 0
+TransitionLower_3_B: x_B_3 >= 0
+TransitionLower_4_A: x_A_4 >= 0
+TransitionLower_4_B: x_B_4 >= 0
+TransitionLower_5_A: x_A_5 >= 0
+TransitionLower_5_B: x_B_5 >= 0
+TransitionLower_6_A: x_A_6 >= 0
+TransitionLower_6_B: x_B_6 >= 0
+TransitionLower_7_A: x_A_7 >= 0
+TransitionLower_7_B: x_B_7 >= 0
+TransitionLower_8_A: x_A_8 >= 0
+TransitionLower_8_B: x_B_8 >= 0
+TransitionLower_9_A: x_A_9 >= 0
+TransitionLower_9_B: x_B_9 >= 0
 Transition_10_A: - 13 T_10_A + x_A_10 <= 0
 Transition_10_B: - 13 T_10_B + x_B_10 <= 0
 Transition_1_B: - 700 T_1_B + x_B_1 <= 0
@@ -139,8 +195,8 @@ Transition_8_A: - 24 T_8_A + x_A_8 <= 0
 Transition_8_B: - 24 T_8_B + x_B_8 <= 0
 Transition_9_A: - 232 T_9_A + x_A_9 <= 0
 Transition_9_B: - 232 T_9_B + x_B_9 <= 0
-VolAwarded_Agg_0_incumbent_UB: x_A_1 + x_C_10 + x_C_3 + x_C_4 + x_C_5 + x_C_9
- <= 3000
+Transitions_0_UB: T_10_A + T_10_B + T_3_A + T_3_B + T_4_A + T_4_B + T_5_A
+ + T_5_B + T_6_A + T_6_B + T_7_A + T_7_B + T_8_A + T_8_B + T_9_A + T_9_B <= 2
 Volume_A: V_A - x_A_1 - x_A_10 - x_A_2 - x_A_3 - x_A_4 - x_A_5 - x_A_6 - x_A_7
  - x_A_8 - x_A_9 = 0
 Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
@@ -174,6 +230,9 @@ y_rebate_B_0
 y_rebate_B_1
 y_rebate_C_0
 y_rebate_C_1
+z_A
+z_B
+z_C
 z_discount_A_0
 z_discount_A_1
 z_discount_B_0
