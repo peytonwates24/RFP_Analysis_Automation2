@@ -2,30 +2,6 @@
 Minimize
 OBJ: S_A + S_B + S_C - rebate_A - rebate_B - rebate_C
 Subject To
-%VolAwarded_Agg_0_A_UB: 0.7 x_A_1 + 0.7 x_A_10 + 0.7 x_A_2 + 0.7 x_A_3
- + 0.7 x_A_4 + 0.7 x_A_5 + 0.7 x_A_6 + 0.7 x_A_7 + 0.7 x_A_8 + 0.7 x_A_9
- - 0.3 x_B_1 - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5
- - 0.3 x_B_6 - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 - 0.3 x_C_1 - 0.3 x_C_10
- - 0.3 x_C_2 - 0.3 x_C_3 - 0.3 x_C_4 - 0.3 x_C_5 - 0.3 x_C_6 - 0.3 x_C_7
- - 0.3 x_C_8 - 0.3 x_C_9 + 1000000000 y_0_A <= 1000000000
-%VolAwarded_Agg_0_B_UB: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3
- - 0.3 x_A_4 - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9
- + 0.7 x_B_1 + 0.7 x_B_10 + 0.7 x_B_2 + 0.7 x_B_3 + 0.7 x_B_4 + 0.7 x_B_5
- + 0.7 x_B_6 + 0.7 x_B_7 + 0.7 x_B_8 + 0.7 x_B_9 - 0.3 x_C_1 - 0.3 x_C_10
- - 0.3 x_C_2 - 0.3 x_C_3 - 0.3 x_C_4 - 0.3 x_C_5 - 0.3 x_C_6 - 0.3 x_C_7
- - 0.3 x_C_8 - 0.3 x_C_9 + 1000000000 y_0_B <= 1000000000
-%VolAwarded_Agg_0_C_UB: - 0.3 x_A_1 - 0.3 x_A_10 - 0.3 x_A_2 - 0.3 x_A_3
- - 0.3 x_A_4 - 0.3 x_A_5 - 0.3 x_A_6 - 0.3 x_A_7 - 0.3 x_A_8 - 0.3 x_A_9
- - 0.3 x_B_1 - 0.3 x_B_10 - 0.3 x_B_2 - 0.3 x_B_3 - 0.3 x_B_4 - 0.3 x_B_5
- - 0.3 x_B_6 - 0.3 x_B_7 - 0.3 x_B_8 - 0.3 x_B_9 + 0.7 x_C_1 + 0.7 x_C_10
- + 0.7 x_C_2 + 0.7 x_C_3 + 0.7 x_C_4 + 0.7 x_C_5 + 0.7 x_C_6 + 0.7 x_C_7
- + 0.7 x_C_8 + 0.7 x_C_9 + 1000000000 y_0_C <= 1000000000
-Active_0_A: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7
- + x_A_8 + x_A_9 - 1000000000 y_0_A <= 0
-Active_0_B: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7
- + x_B_8 + x_B_9 - 1000000000 y_0_B <= 0
-Active_0_C: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7
- + x_C_8 + x_C_9 - 1000000000 y_0_C <= 0
 BaseSpend_A: S0_A - 50 x_A_1 - 64 x_A_10 - 70 x_A_2 - 55 x_A_3 - 23 x_A_4
  - 54 x_A_5 - 42 x_A_6 - 23 x_A_7 - 75 x_A_8 - 97 x_A_9 = 0
 BaseSpend_B: S0_B - 60 x_B_1 - 13 x_B_10 - 80 x_B_2 - 65 x_B_3 - 75 x_B_4
@@ -104,12 +80,6 @@ DiscountTierUpper_C_1: - 0.04 S0_C + d_C + 97000000000 z_discount_C_1
 EffectiveSpend_A: - S0_A + S_A + d_A = 0
 EffectiveSpend_B: - S0_B + S_B + d_B = 0
 EffectiveSpend_C: - S0_C + S_C + d_C = 0
-MinActive_0_A: x_A_1 + x_A_10 + x_A_2 + x_A_3 + x_A_4 + x_A_5 + x_A_6 + x_A_7
- + x_A_8 + x_A_9 - 0.001 y_0_A >= 0
-MinActive_0_B: x_B_1 + x_B_10 + x_B_2 + x_B_3 + x_B_4 + x_B_5 + x_B_6 + x_B_7
- + x_B_8 + x_B_9 - 0.001 y_0_B >= 0
-MinActive_0_C: x_C_1 + x_C_10 + x_C_2 + x_C_3 + x_C_4 + x_C_5 + x_C_6 + x_C_7
- + x_C_8 + x_C_9 - 0.001 y_0_C >= 0
 RebateTierLower_A_0: rebate_A - 19400000000 y_rebate_A_0 >= -19400000000
 RebateTierLower_A_1: - 0.1 S_A + rebate_A - 19400000000 y_rebate_A_1
  >= -19400000000
@@ -169,6 +139,8 @@ Transition_8_A: - 24 T_8_A + x_A_8 <= 0
 Transition_8_B: - 24 T_8_B + x_B_8 <= 0
 Transition_9_A: - 232 T_9_A + x_A_9 <= 0
 Transition_9_B: - 232 T_9_B + x_B_9 <= 0
+VolAwarded_Agg_0_incumbent_UB: x_A_1 + x_C_10 + x_C_3 + x_C_4 + x_C_5 + x_C_9
+ <= 3000
 Volume_A: V_A - x_A_1 - x_A_10 - x_A_2 - x_A_3 - x_A_4 - x_A_5 - x_A_6 - x_A_7
  - x_A_8 - x_A_9 = 0
 Volume_B: V_B - x_B_1 - x_B_10 - x_B_2 - x_B_3 - x_B_4 - x_B_5 - x_B_6 - x_B_7
@@ -196,9 +168,6 @@ T_8_A
 T_8_B
 T_9_A
 T_9_B
-y_0_A
-y_0_B
-y_0_C
 y_rebate_A_0
 y_rebate_A_1
 y_rebate_B_0
