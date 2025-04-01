@@ -4,11 +4,10 @@ import pulp
 import streamlit as st
 import logging
 
-# Configure logging (adjust configuration as needed)
+# Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
-    # Create console handler and set level to debug
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -17,7 +16,7 @@ if not logger.handlers:
 
 # Global constant for Big-M constraints.
 M = 1e9
-# Tolerance (set to 0 so negligible awards are not counted)
+# Tolerance (set to 0 so that negligible awards are not counted)
 EPS = 0.0
 
 #############################################
@@ -298,23 +297,60 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         total_cap = sum(cap for ((sup, _, _), cap) in capacity_data.items() if sup == s)
         U_spend[s] = total_cap * max_price_val
     
-    # --- Discount tiers ---
+    #############################################
+    # Discount tiers
+    #############################################
     z_discount = {}
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
         if tiers:
             z_discount[s] = {k: pulp.LpVariable(f"z_discount_{s}_{k}", cat='Binary') for k in range(len(tiers))}
-            lp_problem += pulp.lpSum(z_discount[s][k] for k in range(len(tiers))) == 1, f"DiscountTierSelect_{s}"
+            feasible_tiers = []
+            for k, tier in enumerate(tiers):
+                Dmin, Dmax, Dperc, scope_attr, scope_value = tier
+                # Convert scope values to strings before stripping
+                if scope_attr is None or scope_value is None or str(scope_attr).strip() == "" or str(scope_value).strip().upper() == "ALL":
+                    total_possible = sum(demand_data[j] for j in items_dynamic)
+                else:
+                    total_possible = sum(demand_data[j] for j in items_dynamic
+                                         if str(item_attr_data[normalize_bid_id(j)].get(scope_attr, "")).strip() == str(scope_value).strip())
+                if float(Dmin) <= total_possible:
+                    feasible_tiers.append(k)
+                else:
+                    logger.info(f"Discount tier {k} for supplier {s} disabled because Dmin ({Dmin}) > total possible volume ({total_possible}).")
+                    lp_problem += z_discount[s][k] == 0, f"DiscountTierDisable_{s}_{k}"
+            if feasible_tiers:
+                lp_problem += pulp.lpSum(z_discount[s][k] for k in feasible_tiers) == 1, f"DiscountTierSelect_{s}"
+            else:
+                lp_problem += pulp.lpSum(z_discount[s][k] for k in range(len(tiers))) == 0, f"DiscountTierSelect_{s}"
         else:
             z_discount[s] = {}
     
-    # --- Rebate tiers ---
+    #############################################
+    # Rebate tiers
+    #############################################
     y_rebate = {}
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
         if tiers:
             y_rebate[s] = {k: pulp.LpVariable(f"y_rebate_{s}_{k}", cat='Binary') for k in range(len(tiers))}
-            lp_problem += pulp.lpSum(y_rebate[s][k] for k in range(len(tiers))) == 1, f"RebateTierSelect_{s}"
+            feasible_tiers = []
+            for k, tier in enumerate(tiers):
+                Rmin, Rmax, Rperc, scope_attr, scope_value = tier
+                if scope_attr is None or scope_value is None or str(scope_attr).strip() == "" or str(scope_value).strip().upper() == "ALL":
+                    total_possible = sum(demand_data[j] for j in items_dynamic)
+                else:
+                    total_possible = sum(demand_data[j] for j in items_dynamic
+                                         if str(item_attr_data[normalize_bid_id(j)].get(scope_attr, "")).strip() == str(scope_value).strip())
+                if float(Rmin) <= total_possible:
+                    feasible_tiers.append(k)
+                else:
+                    logger.info(f"Rebate tier {k} for supplier {s} disabled because Rmin ({Rmin}) > total possible volume ({total_possible}).")
+                    lp_problem += y_rebate[s][k] == 0, f"RebateTierDisable_{s}_{k}"
+            if feasible_tiers:
+                lp_problem += pulp.lpSum(y_rebate[s][k] for k in feasible_tiers) == 1, f"RebateTierSelect_{s}"
+            else:
+                lp_problem += pulp.lpSum(y_rebate[s][k] for k in range(len(tiers))) == 0, f"RebateTierSelect_{s}"
         else:
             y_rebate[s] = {}
     
@@ -329,7 +365,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     # --- Objective ---
     lp_problem += pulp.lpSum(S[s] - rebate_var[s] for s in suppliers), "Total_Effective_Cost"
     
-    # --- Discount Tier constraints (unchanged) ---
+    # --- Discount Tier constraints ---
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
         M_discount = U_spend[s] if s in U_spend else M
@@ -340,11 +376,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             if (not scope_attr_str.strip()) or (scope_attr_str.strip().upper() == "ALL") or (not scope_value_str.strip()) or (scope_value_str.strip().upper() == "ALL"):
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(
-                    x[(s, j)] 
-                    for j in items_dynamic 
-                    if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value
-                )
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic 
+                                      if str(item_attr_data[normalize_bid_id(j)].get(scope_attr, "")).strip() == str(scope_value).strip())
             lp_problem += vol_expr >= Dmin * z_discount[s][k], f"DiscountTierMin_{s}_{k}"
             if Dmax < float('inf'):
                 lp_problem += vol_expr <= Dmax + M_discount * (1 - z_discount[s][k]), f"DiscountTierMax_{s}_{k}"
@@ -353,7 +386,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     for s in suppliers:
         lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
     
-    # --- Rebate Tier constraints (unchanged) ---
+    # --- Rebate Tier constraints ---
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
         M_rebate = U_spend[s] if s in U_spend else M
@@ -364,11 +397,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             if (not scope_attr_str.strip()) or (scope_attr_str.strip().upper() == "ALL") or (not scope_value_str.strip()) or (scope_value_str.strip().upper() == "ALL"):
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
-                vol_expr = pulp.lpSum(
-                    x[(s, j)]
-                    for j in items_dynamic
-                    if item_attr_data[normalize_bid_id(j)].get(scope_attr) == scope_value
-                )
+                vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic
+                                      if str(item_attr_data[normalize_bid_id(j)].get(scope_attr, "")).strip() == str(scope_value).strip())
             lp_problem += vol_expr >= Rmin * y_rebate[s][k], f"RebateTierMin_{s}_{k}"
             if Rmax < float('inf'):
                 lp_problem += vol_expr <= Rmax + M_rebate * (1 - y_rebate[s][k]), f"RebateTierMax_{s}_{k}"
@@ -392,7 +422,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     # CUSTOM RULES PROCESSING
     #############################################
     for r_idx, rule in enumerate(rules):
-        # Revised "# of Suppliers" rule.
+        # "# of Suppliers" rule.
         if rule["rule_type"].lower() == "# of suppliers":
             try:
                 supplier_target = int(rule["rule_input"])
@@ -420,8 +450,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 lp_problem += supplier_count == supplier_target, f"SupplierCount_{r_idx}_EQ"
             continue
         
-        # --------------------------------------------------------------------------
-        # Revised "% of Volume Awarded" rule (unchanged)
+        # "% of Volume Awarded" rule.
         elif rule["rule_type"].lower() == "% of volume awarded":
             try:
                 percentage = float(rule["rule_input"].rstrip("%")) / 100.0
@@ -517,8 +546,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += lhs >= percentage * total_vol, f"%VolAwarded_{r_idx}_{j}_EQ_LB"
                         lp_problem += lhs <= percentage * total_vol, f"%VolAwarded_{r_idx}_{j}_EQ_UB"
                         
-        # --------------------------------------------------------------------------
-        # Revised "# of Volume Awarded" rule.
+        # "# of Volume Awarded" rule (absolute units, similar to the % rule above)
         elif rule["rule_type"].lower() == "# of volume awarded":
             try:
                 volume_target = float(rule["rule_input"])
@@ -574,6 +602,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     lp_problem += aggregated_vol <= volume_target, f"VolAwarded_Agg_{r_idx}_{scope}_EQ_UB"
             else:
                 for j in group_items:
+                    total_vol = pulp.lpSum(x[(s, j)] for s in suppliers)
                     if scope == "lowest cost supplier":
                         supplier_for_rule = lowest_cost_supplier[j]
                         lhs = x[(supplier_for_rule, j)]
@@ -612,8 +641,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         lp_problem += lhs >= volume_target, f"VolAwarded_{r_idx}_{j}_EQ_LB"
                         lp_problem += lhs <= volume_target, f"VolAwarded_{r_idx}_{j}_EQ_UB"
         
-        # --------------------------------------------------------------------------
-        # Revised "# of Transitions" rule.
+        # "# of Transitions" rule.
         elif rule["rule_type"].lower() == "# of transitions":
             try:
                 transitions_target = int(rule["rule_input"])
@@ -638,8 +666,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             elif operator == "exactly":
                 lp_problem += total_transitions == transitions_target, f"Transitions_{r_idx}_EQ"
         
-        # --------------------------------------------------------------------------
-        # New branch: Exclude Bids rule.
+        # Exclude Bids rule.
         elif rule["rule_type"].lower() == "exclude bids":
             bid_group = rule.get("bid_grouping")
             if bid_group is None:
@@ -678,8 +705,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                             if abs(bid_val_num - target) > 1e-6:
                                 exclude = True
                     except:
-                        target = rule.get("bid_exclusion_value", "").strip().lower()
-                        if bid_val.strip().lower() == target:
+                        target = str(rule.get("bid_exclusion_value", "")).strip().lower()
+                        if str(bid_val).strip().lower() == target:
                             exclude = True
                         else:
                             exclude = False
@@ -687,8 +714,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         logger.info(f"Exclude Bids rule {r_idx}: Excluding bid {j} for supplier {s} because {bid_group} value {bid_val} meets exclusion criteria.")
                         lp_problem += x[(s, j)] == 0, f"BidExclusion_{r_idx}_{j}_{s}"
         
-        # --------------------------------------------------------------------------
-        # New branch: Supplier Exclusion rule.
+        # Supplier Exclusion rule.
         elif rule["rule_type"].lower() == "supplier exclusion":
             if rule["grouping"].strip().upper() == "ALL" or not rule["grouping_scope"].strip():
                 group_items = items_dynamic
@@ -702,7 +728,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 norm_j = normalize_bid_id(j)
                 incumbent_val = item_attr_data[norm_j].get("Incumbent")
                 if incumbent_val is not None:
-                    incumbent_val = incumbent_val.strip().lower()
+                    incumbent_val = str(incumbent_val).strip().lower()
                 logger.debug(f"Supplier Exclusion rule {r_idx}: Processing bid {norm_j} with incumbent '{incumbent_val}'.")
                 if supplier_scope == "incumbent":
                     if incumbent_val:
@@ -716,7 +742,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         continue
                     logger.info(f"Rule {r_idx}: For bid {norm_j}, incumbent is '{incumbent_val}'; excluding all suppliers not equal to incumbent.")
                     for s in suppliers:
-                        if s.strip().lower() != incumbent_val:
+                        if str(s).strip().lower() != incumbent_val:
                             logger.debug(f"Rule {r_idx}: Excluding supplier '{s}' from bid {norm_j} (new supplier).")
                             lp_problem += x[(s, norm_j)] == 0, f"SupplierExclusion_{r_idx}_{norm_j}_{s}"
                 elif supplier_scope == "lowest cost supplier":
@@ -749,19 +775,19 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     lp_problem.solve(solver)
     model_status = pulp.LpStatus[lp_problem.status]
 
-    # --- Feasibility notes (unchanged) ---
+    # --- Feasibility notes ---
     feasibility_notes = ""
     if model_status == "Infeasible":
         feasibility_notes += "Model is infeasible. Likely causes include:\n"
         feasibility_notes += " - Insufficient supplier capacity relative to demand.\n"
         feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n\n"
         feasibility_notes += "Detailed Rule Evaluations:\n"
-        # (Omitted detailed rule evaluation for brevity)
+        # (Detailed rule evaluation omitted for brevity)
     else:
         feasibility_notes = "Model is optimal."
     
     #############################################
-    # PREPARE RESULTS (unchanged)
+    # PREPARE RESULTS
     #############################################
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
