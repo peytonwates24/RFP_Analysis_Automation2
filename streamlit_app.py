@@ -164,14 +164,14 @@ def main():
     # Create buttons in the sidebar for navigation
     if st.sidebar.button('Home'):
         navigate_to('home')
-    if st.sidebar.button('Start a New Analysis'):
+    if st.sidebar.button('Scenario Reports'):
         navigate_to('upload')
-    if st.sidebar.button('Optimization Mode'):
+    if st.sidebar.button('Scenario Optimizer'):
         navigate_to('optimization')
-    if st.sidebar.button('My Projects'):
-        navigate_to('analysis')
-    if st.sidebar.button('Upload Database'):
-        navigate_to('upload database')
+    #if st.sidebar.button('My Projects'):
+    #    navigate_to('analysis')
+    #if st.sidebar.button('Upload Database'):
+    #    navigate_to('upload database')
     if st.sidebar.button('About'):
         navigate_to('about')
 
