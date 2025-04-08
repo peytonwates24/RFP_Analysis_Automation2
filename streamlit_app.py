@@ -295,6 +295,28 @@ def main():
     elif section == 'optimization':
         st.title("Scenario Builder & Optimization")
 
+        ################################################################
+        # 1) DEFAULT SCENARIOS (Best of Best = no rules, As-is = 1 rule)
+        ################################################################
+        if "scenario_definitions" not in st.session_state:
+            st.session_state["scenario_definitions"] = {}
+
+            # Add a “Best of Best” scenario with no rules
+            st.session_state["scenario_definitions"]["Best of Best"] = []
+
+            # Add an “As-is” scenario with a single rule: exactly 100% volume, grouping=All
+            st.session_state["scenario_definitions"]["As-is"] = [
+                {
+                    "rule_type": "% of Volume Awarded",
+                    "operator": "Exactly",
+                    "rule_input": "100",
+                    "grouping": "All",
+                    "grouping_scope": "All",
+                    "supplier_scope": "Incumbent"
+                }
+            ]
+
+        # Let the user upload Excel
         uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
         
         if uploaded_file is not None:
@@ -304,316 +326,278 @@ def main():
                 missing = validate_sheet(df, sheet_name)
                 if missing:
                     st.error(f"Missing required columns in '{sheet_name}': {', '.join(missing)}")
-            
-            # Use an expander for the Custom Rules UI.
-            with st.expander("Custom Rules", expanded=True):
-                st.markdown("### Custom Rules")
-                
-                # Define your rule descriptions dictionary.
-                rule_descriptions = {
-                    "% of Volume Awarded": "This rule uses the selected operator (e.g., 'At least', 'At most', 'Exactly') along with the rule input (e.g., '50%') to ensure that the specified supplier receives that percentage of the total volume for the defined grouping.",
-                    "# of Volume Awarded": "This rule applies an operator to the rule input (a specific number of units) to control the exact, minimum, or maximum volume awarded to a supplier within the chosen grouping.",
-                    "# of Transitions": "This rule uses the operator and rule input (a numeric value) to limit the total number of supplier transitions across the bids in a grouping.",
-                    "# of Suppliers": "This rule enforces that the number of unique suppliers awarded within a grouping meets the target defined by the rule input, using the specified operator.",
-                    "Supplier Exclusion": "This rule excludes a specified supplier from the grouping; no operator or rule input is needed since that supplier is entirely removed.",
-                    "Exclude Bids": "This rule removes bids from consideration when a specific bid attribute meets the condition defined by the operator and rule input (or a fixed exclusion value for textual attributes).",
-                    "# Minimum Volume Awarded": "This rule mandates that a supplier must be awarded at least the number of volume units specified in the rule input. (Operator is implicitly 'At least'.)",
-                    "% Minimum Volume Awarded": "This rule requires that a supplier is awarded at least the percentage of the total volume specified by the rule input, with the operator set to 'At least'."
-                }
-                
-                # Rule Type selectbox.
-                rule_type = st.selectbox(
-                    "Rule Type", 
-                    options=[
-                        "% of Volume Awarded", "# of Volume Awarded", "# of Transitions", "# of Suppliers", 
-                        "Supplier Exclusion", "Exclude Bids"
-                    ],
-                    key="rule_type_select"
-                )
-                
-                # Display the description for the selected rule type (only once).
-                st.markdown(f"<small>*{rule_descriptions[rule_type]}*</small>", unsafe_allow_html=True)
-                
-                # Place Operator and Rule Input side by side.
-                col_operator, col_rule_input = st.columns(2)
-                with col_operator:
-                    if rule_type == "Supplier Exclusion":
-                        operator = "Exactly"
-                        st.selectbox("Operator", options=["Exactly"], key="operator_select", disabled=True)
-                    elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
-                        operator = "At least"
-                        st.selectbox("Operator", options=["At least"], key="operator_select", disabled=True)
-                    elif rule_type == "Exclude Bids":
-                        st.empty()  # Global operator is not used for Exclude Bids.
-                    else:
-                        operator = st.selectbox("Operator", options=["At least", "At most", "Exactly"], key="operator_select")
-                
-                with col_rule_input:
-                    if rule_type == "% of Volume Awarded":
-                        rule_input_value = st.number_input(
-                            "Rule Input (as percentage)",
-                            min_value=0.0,
-                            max_value=100.0,
-                            value=50.0,
-                            step=0.01,
-                            format="%.2f",
-                            key="rule_input_percentage"
-                        )
-                        rule_input = f"{rule_input_value:.2f}%"
-                    elif rule_type == "# of Volume Awarded":
-                        rule_input_value = st.number_input(
-                            "Rule Input (number of units)",
-                            min_value=0,
-                            value=0,
-                            step=1,
-                            key="rule_input_volume"
-                        )
-                        rule_input = str(rule_input_value)
-                    elif rule_type == "# of Transitions":
-                        rule_input_value = st.number_input(
-                            "Rule Input (number of transitions)",
-                            min_value=0,
-                            value=0,
-                            step=1,
-                            key="rule_input_transitions"
-                        )
-                        rule_input = str(rule_input_value)
-                    elif rule_type == "% Minimum Volume Awarded":
-                        rule_input_value = st.number_input(
-                            "Rule Input (as percentage)",
-                            min_value=0.0,
-                            max_value=100.0,
-                            value=50.0,
-                            step=0.01,
-                            format="%.2f",
-                            key="rule_input_min_pct"
-                        )
-                        rule_input = f"{rule_input_value:.2f}%"
-                    elif rule_type == "# Minimum Volume Awarded":
-                        rule_input_value = st.number_input(
-                            "Rule Input (number of units)",
-                            min_value=0,
-                            value=0,
-                            step=1,
-                            key="rule_input_min_units"
-                        )
-                        rule_input = str(rule_input_value)
-                    elif rule_type == "Supplier Exclusion":
-                        rule_input = ""
-                        st.text_input("Rule Input", value="", key="rule_input_field", disabled=True)
-                    elif rule_type != "Exclude Bids":
-                        rule_input = st.text_input("Rule Input", key="rule_input_field")
-                
-                # (Handle the "Exclude Bids" branch here if needed, as before.)
 
-                
-                # If the rule type is "Exclude Bids", you can handle its unique UI below (separately)
-                if rule_type == "Exclude Bids":
-                    supplier_bid_attr_df = sheet_dfs.get("Supplier Bid Attributes")
-                    if supplier_bid_attr_df is not None:
-                        bid_attr_columns = [col for col in supplier_bid_attr_df.columns if col not in ["Supplier Name", "Bid ID"]]
-                    else:
-                        bid_attr_columns = []
-                    
-                    col_bid, col_operator_exclude = st.columns([1, 1])
-                    with col_bid:
-                        bid_grouping = st.selectbox("Bid Grouping", options=bid_attr_columns, key="bid_grouping_select")
-                    is_numeric = False
-                    if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
-                        non_null = supplier_bid_attr_df[bid_grouping].dropna()
-                        if not non_null.empty:
-                            try:
-                                float(non_null.iloc[0])
-                                is_numeric = True
-                            except:
-                                is_numeric = False
-                    with col_operator_exclude:
-                        if is_numeric:
-                            operator = st.selectbox("Operator", options=["Greater than", "Less than", "Equal To"],
-                                                    key="operator_select_exclude_bids", disabled=False)
+            ################################################################
+            # 2) CUSTOM RULES EXPANDER (with Save & Single-run)
+            ################################################################
+            with st.expander("Custom Rules (Current Rule Set)", expanded=True):
+                st.markdown("#### Build & Manage Your Current Rule Set")
+
+                # Columns for (left) rule-building, (middle) scenario name, (right) save scenario
+                col1, col2, col3 = st.columns([2, 1, 1])
+
+                # -- (A) The original rule-building UI in col1 --
+                with col1:
+                    rule_descriptions = {
+                        "% of Volume Awarded": "Operator + % ensures the specified supplier scope receives that portion of volume.",
+                        "# of Volume Awarded": "Operator + number of units awarded to the supplier scope.",
+                        "# of Transitions": "Limits total transitions away from incumbents within a grouping.",
+                        "# of Suppliers": "Restricts how many unique suppliers are used in a grouping.",
+                        "Supplier Exclusion": "Excludes a chosen supplier from the grouping entirely; no rule input needed.",
+                        "Exclude Bids": "Removes bids if a certain attribute meets the chosen operator and threshold/value.",
+                        "# Minimum Volume Awarded": "Requires at least X units for a specific supplier scope.",
+                        "% Minimum Volume Awarded": "Requires at least a certain % of volume for a supplier scope."
+                    }
+
+                    rule_type = st.selectbox(
+                        "Rule Type", 
+                        options=[
+                            "% of Volume Awarded", "# of Volume Awarded", "# of Transitions", "# of Suppliers", 
+                            "Supplier Exclusion", "Exclude Bids"
+                        ],
+                        key="rule_type_select"
+                    )
+                    st.markdown(f"<small>*{rule_descriptions.get(rule_type, '')}*</small>", unsafe_allow_html=True)
+
+                    # Operator & Input
+                    col_op, col_in = st.columns(2)
+                    with col_op:
+                        if rule_type == "Supplier Exclusion":
+                            operator = "Exactly"
+                            st.selectbox("Operator", ["Exactly"], disabled=True, key="operator_select")
+                        elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
+                            operator = "At least"
+                            st.selectbox("Operator", ["At least"], disabled=True, key="operator_select")
+                        elif rule_type == "Exclude Bids":
+                            st.empty()
+                            operator = ""
                         else:
-                            operator = st.selectbox("Operator", options=["Equal To"],
-                                                    key="operator_select_exclude_bids", disabled=True)
-                    if is_numeric:
-                        rule_input = st.number_input("Rule Input (numeric threshold)", min_value=0.0, value=0.0, step=0.01,
-                                                    key="rule_input_bid_exclusion_numeric")
-                        bid_exclusion_value = None
-                    else:
+                            operator = st.selectbox("Operator", ["At least", "At most", "Exactly"], key="operator_select")
+
+                    with col_in:
                         rule_input = ""
+                        if rule_type == "% of Volume Awarded":
+                            pct_val = st.number_input("Rule Input (as %)", 0.0, 100.0, 50.0, step=0.01)
+                            rule_input = f"{pct_val:.2f}%"
+                        elif rule_type == "# of Volume Awarded":
+                            vol_val = st.number_input("Rule Input (#units)", 0, 999999, 0)
+                            rule_input = str(vol_val)
+                        elif rule_type == "# of Transitions":
+                            trans_val = st.number_input("Rule Input (#transitions)", 0, 999999, 0)
+                            rule_input = str(trans_val)
+                        elif rule_type == "% Minimum Volume Awarded":
+                            pct_val = st.number_input("Rule Input (as %)", 0.0, 100.0, 50.0, step=0.01)
+                            rule_input = f"{pct_val:.2f}%"
+                        elif rule_type == "# Minimum Volume Awarded":
+                            vol_val = st.number_input("Rule Input (#units)", 0, 999999, 0)
+                            rule_input = str(vol_val)
+                        elif rule_type == "Supplier Exclusion":
+                            st.text_input("Rule Input", value="", disabled=True)
+                            rule_input = ""
+                        elif rule_type != "Exclude Bids":
+                            rule_input = st.text_input("Rule Input")
+
+                    # If "Exclude Bids," special numeric/text logic
+                    bid_grouping = None
+                    bid_exclusion_value = None
+                    if rule_type == "Exclude Bids":
+                        supplier_bid_attr_df = sheet_dfs.get("Supplier Bid Attributes")
+                        if supplier_bid_attr_df is not None:
+                            bid_attr_columns = [c for c in supplier_bid_attr_df.columns if c not in ["Supplier Name", "Bid ID"]]
+                        else:
+                            bid_attr_columns = []
+
+                        cb1, cb2 = st.columns([1,1])
+                        with cb1:
+                            bid_grouping = st.selectbox("Bid Grouping", bid_attr_columns, key="bid_grouping_select")
+
+                        is_numeric = False
                         if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
-                            unique_values = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
+                            non_null = supplier_bid_attr_df[bid_grouping].dropna()
+                            if not non_null.empty:
+                                try:
+                                    float(non_null.iloc[0])
+                                    is_numeric = True
+                                except:
+                                    is_numeric = False
+
+                        with cb2:
+                            if is_numeric:
+                                operator = st.selectbox("Operator", ["Greater than", "Less than", "Equal To"], key="operator_select_exclude_bids")
+                            else:
+                                operator = st.selectbox("Operator", ["Equal To"], disabled=True, key="operator_select_exclude_bids")
+
+                        if is_numeric:
+                            thr = st.number_input("Rule Input (numeric threshold)", 0.0, 9999999.0, 0.0, step=0.01, key="rule_input_bid_exclusion_numeric")
+                            rule_input = str(thr)
+                            bid_exclusion_value = None
                         else:
-                            unique_values = []
-                        bid_exclusion_value = st.selectbox("Bid Exclusion Value", options=unique_values,
-                                                        key="bid_exclusion_value_select")
+                            rule_input = ""
+                            if supplier_bid_attr_df is not None and bid_grouping in supplier_bid_attr_df.columns:
+                                unique_vals = sorted(supplier_bid_attr_df[bid_grouping].dropna().unique())
+                            else:
+                                unique_vals = []
+                            bid_exclusion_value = st.selectbox("Bid Exclusion Value", unique_vals, key="bid_exclusion_value_select")
 
+                    # Grouping
+                    if "Item Attributes" in sheet_dfs:
+                        item_attr_temp = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                        sample_keys = list(next(iter(item_attr_temp.values())).keys())
+                        grouping_options = ["All", "Bid ID"] + sample_keys
+                    else:
+                        grouping_options = ["All", "Bid ID"]
 
+                    cgr1, cgr2 = st.columns(2)
+                    with cgr1:
+                        grouping_sel = st.selectbox("Grouping", grouping_options, key="grouping_select")
+                    with cgr2:
+                        def update_grouping_scope(g, item_attr):
+                            if g == "Bid ID":
+                                return sorted(list(item_attr.keys()))
+                            else:
+                                return sorted({
+                                    str(item_attr[bid].get(g, "")).strip()
+                                    for bid in item_attr if str(item_attr[bid].get(g, "")).strip() != ""
+                                })
 
-                
-                # Build grouping options from the "Item Attributes" sheet.
-                if "Item Attributes" in sheet_dfs:
-                    temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
-                    sample_keys = list(next(iter(temp_item_attr.values())).keys())
-                    grouping_options = ["All", "Bid ID"] + sample_keys
-                else:
-                    grouping_options = ["All", "Bid ID"]
-                
-                col_group, col_group_scope = st.columns(2)
-                with col_group:
-                    grouping = st.selectbox("Grouping", options=grouping_options, key="grouping_select")
-                with col_group_scope:
-                    def update_grouping_scope(grouping, item_attr_data):
-                        if grouping == "Bid ID":
-                            vals = sorted(list(item_attr_data.keys()))
+                        if grouping_sel != "All":
+                            grouping_scope_opts = ["Apply to all items individually"] + update_grouping_scope(grouping_sel, item_attr_temp)
+                            grouping_scope_sel = st.selectbox("Grouping Scope", grouping_scope_opts, key="grouping_scope_select")
                         else:
-                            vals = sorted({str(item_attr_data[bid].get(grouping, "")).strip()
-                                        for bid in item_attr_data if str(item_attr_data[bid].get(grouping, "")).strip() != ""})
-                        return ["Apply to all items individually"] + vals
-                    if grouping != "All":
-                        grouping_scope = st.selectbox("Grouping Scope", options=update_grouping_scope(grouping, temp_item_attr), key="grouping_scope_select")
-                    else:
-                        grouping_scope = "All"
-                
-                # Supplier Scope handling.
-                if rule_type in ["# of Transitions", "# of Suppliers"]:
-                    supplier_scope = "All"
-                    st.selectbox("Supplier Scope", options=["All"], index=0, key="supplier_scope_select", disabled=True)
-                elif rule_type == "Exclude Bids":
-                    # For Exclude Bids, disable supplier scope so that it always returns "All"
-                    supplier_scope = st.selectbox("Supplier Scope", options=["All"], key="supplier_scope_select", disabled=True)
-                elif rule_type in ["% of Volume Awarded", "# of Volume Awarded"]:
-                    if "Price" in sheet_dfs:
-                        suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
-                    else:
-                        suppliers_auto = []
-                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
-                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
+                            grouping_scope_sel = "All"
 
-                elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
-                    if "Price" in sheet_dfs:
-                        suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
-                    else:
-                        suppliers_auto = []
-                    # Enable the "All" option here.
-                    default_supplier_scope_options = ["All"] + suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
-                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
-                else:
-                    if "Price" in sheet_dfs:
-                        suppliers_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
-                    else:
-                        suppliers_auto = []
-                    default_supplier_scope_options = suppliers_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
-                    supplier_scope = st.selectbox("Supplier Scope", options=default_supplier_scope_options, key="supplier_scope_select")
-                    if supplier_scope == "All":
-                        supplier_scope = None
-
-
-
-
-
-
-                
-                col_add, col_clear = st.columns(2)
-                with col_add:
-                    if st.button("Add Rule", key="add_rule_button"):
-                        errors = []
-                        # Validate percentage-based rule inputs.
-                        if rule_type in ["% of Volume Awarded", "% Minimum volume awarded"]:
-                            try:
-                                percent_val = float(rule_input.rstrip("%"))
-                                if percent_val < 0 or percent_val > 100:
-                                    errors.append("Percentage must be between 0 and 100.")
-                            except Exception:
-                                errors.append("Invalid percentage format for rule input. Please use a format like 50.00%.")
-                        # Validate numeric rule inputs.
-                        elif rule_type in ["# of Volume Awarded", "# of transitions", "# Minimum volume awarded"]:
-                            try:
-                                _ = float(rule_input)
-                            except Exception:
-                                errors.append("Please enter a valid numeric value for the rule input.")
-                        # Validate for "Exclude Bids" textual case.
-                        if rule_type == "Exclude Bids" and not is_bid_attribute_numeric(bid_grouping, df_to_dict_supplier_bid_attributes(supplier_bid_attr_df)):
-                            if not bid_exclusion_value:
-                                errors.append("Please select a Bid Exclusion Value.")
-
-                        if errors:
-                            for error in errors:
-                                st.error(error)
-                            st.stop()
+                    # Supplier scope logic
+                    if rule_type in ["# of Transitions", "# of Suppliers"]:
+                        supplier_scope = "All"
+                        st.selectbox("Supplier Scope", ["All"], disabled=True)
+                    elif rule_type == "Exclude Bids":
+                        supplier_scope = st.selectbox("Supplier Scope", ["All"], disabled=True)
+                    elif rule_type in ["% of Volume Awarded", "# of Volume Awarded"]:
+                        if "Price" in sheet_dfs:
+                            s_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
                         else:
-                            rule = {
-                                "rule_type": rule_type,
-                                "operator": operator,
-                                "rule_input": rule_input,
-                                "grouping": grouping,
-                                "grouping_scope": grouping_scope,
-                                "supplier_scope": supplier_scope
-                            }
+                            s_auto = []
+                        def_scopes = ["All"] + s_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                        supplier_scope = st.selectbox("Supplier Scope", def_scopes)
+                    elif rule_type in ["% Minimum Volume Awarded", "# Minimum Volume Awarded"]:
+                        if "Price" in sheet_dfs:
+                            s_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                        else:
+                            s_auto = []
+                        def_scopes = ["All"] + s_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                        supplier_scope = st.selectbox("Supplier Scope", def_scopes)
+                    else:
+                        if "Price" in sheet_dfs:
+                            s_auto = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                        else:
+                            s_auto = []
+                        def_scopes = s_auto + ["New Suppliers", "Lowest cost supplier", "Second Lowest Cost Supplier", "Incumbent"]
+                        supplier_scope = st.selectbox("Supplier Scope", def_scopes)
+                        if supplier_scope == "All":
+                            supplier_scope = None
+
+                    rcol_add, rcol_clear = st.columns(2)
+                    with rcol_add:
+                        if st.button("Add Rule"):
+                            errors = []
+                            if rule_type in ["% of Volume Awarded", "% Minimum volume awarded"]:
+                                try:
+                                    p_test = float(rule_input.rstrip("%"))
+                                    if p_test < 0 or p_test > 100:
+                                        errors.append("Percentage must be between 0 and 100.")
+                                except:
+                                    errors.append("Invalid percentage format (e.g. '50.00%').")
+                            elif rule_type in ["# of Volume Awarded", "# of transitions", "# Minimum volume awarded"]:
+                                try:
+                                    float(rule_input)
+                                except:
+                                    errors.append("Please enter a valid numeric value for the rule input.")
                             if rule_type == "Exclude Bids":
-                                rule["bid_grouping"] = bid_grouping
-                                rule["bid_exclusion_value"] = bid_exclusion_value
-                            if "rules_list" not in st.session_state:
-                                st.session_state.rules_list = []
-                            st.session_state.rules_list.append(rule)
-                            st.success("Rule added.")
-                with col_clear:
-                    if st.button("Clear Rules", key="clear_rules_button"):
-                        st.session_state.rules_list = []
-                        st.success("All rules cleared.")
+                                sbad = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                                if not is_bid_attribute_numeric(bid_grouping, sbad):
+                                    if not bid_exclusion_value:
+                                        errors.append("Please select a Bid Exclusion Value.")
 
-                # When displaying the current rules:
-                # Assuming you have already set:
+                            if errors:
+                                for e in errors:
+                                    st.error(e)
+                                st.stop()
+                            else:
+                                new_rule = {
+                                    "rule_type": rule_type,
+                                    "operator": operator,
+                                    "rule_input": rule_input,
+                                    "grouping": grouping_sel,
+                                    "grouping_scope": grouping_scope_sel,
+                                    "supplier_scope": supplier_scope
+                                }
+                                if rule_type == "Exclude Bids":
+                                    new_rule["bid_grouping"] = bid_grouping
+                                    new_rule["bid_exclusion_value"] = bid_exclusion_value
+
+                                if "rules_list" not in st.session_state:
+                                    st.session_state.rules_list = []
+                                st.session_state.rules_list.append(new_rule)
+                                st.success("Rule added.")
+
+                    with rcol_clear:
+                        if st.button("Clear Rules"):
+                            st.session_state.rules_list = []
+                            st.success("All rules cleared.")
+
+                # (B) Middle & Right columns for scenario name & Save button
+                with col2:
+                    st.write("**Scenario Name**")
+                    scenario_name = st.text_input("", label_visibility="collapsed")
+                with col3:
+                    st.write("")
+                    if st.button("Save Scenario"):
+                        if not scenario_name.strip():
+                            st.error("Scenario name cannot be empty.")
+                        elif not st.session_state.get("rules_list"):
+                            st.error("No rules to save.")
+                        else:
+                            st.session_state["scenario_definitions"][scenario_name] = list(st.session_state["rules_list"])
+                            st.success(f"Scenario '{scenario_name}' saved with {len(st.session_state['rules_list'])} rules.")
+
+                # Show the current unsaved rules
                 temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
-
-                if "rules_list" in st.session_state and st.session_state.rules_list:
-                    st.markdown("#### Current Rules")
-                    for i, rule in enumerate(st.session_state.rules_list):
-                        col_rule, col_del = st.columns([0.95, 0.05])
-                        with col_rule:
-                            # Use <br> in the expanded text so each rule appears on a new line.
-                            st.markdown(f"<div class='rule-text'>{expand_rule_text(rule, temp_item_attr)}</div>", unsafe_allow_html=True)
-                        with col_del:
+                if st.session_state.get("rules_list"):
+                    st.markdown("#### Current Rule Set")
+                    for i, rule_obj in enumerate(st.session_state["rules_list"]):
+                        ccol_rule, ccol_delete = st.columns([0.95, 0.05])
+                        with ccol_rule:
+                            st.markdown(f"<div class='rule-text'>{expand_rule_text(rule_obj, temp_item_attr)}</div>", unsafe_allow_html=True)
+                        with ccol_delete:
                             if st.button("X", key=f"delete_rule_{i}"):
-                                st.session_state.rules_list.pop(i)
+                                st.session_state["rules_list"].pop(i)
+                                st.rerun()
 
+                # Single-run button for the current rule list
+                st.markdown("#### Run Current Rule Set")
+                if st.button("Run Current Ruleset"):
+                    required_sheet_names = [
+                        "Item Attributes", "Price", "Demand", "Rebate Tiers", 
+                        "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+                    ]
+                    missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
+                    if missing_sheets:
+                        st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Cannot run optimization.")
+                        st.stop()
 
+                    try:
+                        item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                        price_dict = df_to_dict_price(sheet_dfs["Price"])
+                        demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
+                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
+                        capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
+                        rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
+                        discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
+                        supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                        suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
 
-
-
-            
-            # End Custom Rules section.
-            
-            # Verify that all required sheets exist.
-            required_sheet_names = [
-                "Item Attributes", "Price", "Demand", "Rebate Tiers", 
-                "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
-            ]
-            missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
-            if missing_sheets:
-                st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Please upload an Excel file that contains all of these sheets.")
-                st.stop()  # Stop further execution until the error is corrected.
-
-            if all(sheet in sheet_dfs for sheet in required_sheet_names):
-                try:
-                    # Convert sheets to dictionaries.
-                    item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
-                    price_dict = df_to_dict_price(sheet_dfs["Price"])
-                    demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
-                    baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
-                    capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
-                    rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
-                    discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
-                    supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
-                    
-                    
-                    # Auto-detect suppliers from the Price sheet.
-                    suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
-                    st.session_state.suppliers = suppliers
-                    st.success("Data extraction complete. Ready to run optimization.")
-                    
-                    if st.button("Run Optimization"):
                         with st.spinner("Running optimization..."):
-                            output_file, feasibility_notes, model_status = run_optimization(
+                            out_file, feasibility_notes, model_status = run_optimization(
                                 capacity_dict,
                                 demand_dict,
                                 item_attr_dict,
@@ -621,20 +605,151 @@ def main():
                                 rebate_tiers_dict,
                                 discount_tiers_dict,
                                 baseline_price_dict,
-                                rules=st.session_state.rules_list,
+                                rules=st.session_state["rules_list"],
                                 supplier_bid_attr_dict=supplier_bid_attr_dict,
                                 suppliers=suppliers
                             )
+
                         st.success(f"Model Status: {model_status}")
+                        if model_status == "Infeasible":
+                            st.warning("This scenario was infeasible. No feasible solution found.")
                         st.markdown("#### Feasibility Notes")
                         st.text(feasibility_notes)
                         st.markdown("#### Optimization Results")
-                        df_results = pd.read_excel(output_file, sheet_name="Results")
-                        st.dataframe(df_results)
-                        with open(output_file, "rb") as f:
-                            st.download_button("Download Results", f, file_name="optimization_results.xlsx")
-                except Exception as e:
-                    st.error(f"Error preparing data for optimization: {e}")
+                        try:
+                            df_results = pd.read_excel(out_file, sheet_name="Results")
+                            st.dataframe(df_results)
+                            with open(out_file, "rb") as f:
+                                st.download_button("Download Results", f, file_name="optimization_results.xlsx")
+                        except Exception as e:
+                            st.warning("Unable to read 'Results' sheet. Possibly no solution was found.")
+                    except Exception as e:
+                        st.error(f"Error preparing data for optimization: {e}")
+
+            ################################################################
+            # 3) SAVED SCENARIOS EXPANDER (with “Run All Scenarios”)
+            ################################################################
+            with st.expander("Saved Scenarios", expanded=True):
+                st.markdown("#### Manage & Run All Scenarios")
+
+                if not st.session_state["scenario_definitions"]:
+                    st.info("No saved scenarios yet.")
+                else:
+                    for scen_name, rules_set in list(st.session_state["scenario_definitions"].items()):
+                        row1, row2 = st.columns([0.8, 0.2])
+                        with row1:
+                            st.write(f"**Scenario:** {scen_name} ({len(rules_set)} rules)")
+                        with row2:
+                            if st.button(f"Delete {scen_name}"):
+                                del st.session_state["scenario_definitions"][scen_name]
+                                st.rerun()
+
+                st.markdown("#### Run All Saved Scenarios")
+                if st.button("Run All Scenarios"):
+                    if not st.session_state["scenario_definitions"]:
+                        st.error("No scenarios have been saved.")
+                        st.stop()
+
+                    required_sheet_names = [
+                        "Item Attributes", "Price", "Demand", "Rebate Tiers", 
+                        "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+                    ]
+                    missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
+                    if missing_sheets:
+                        st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Cannot run optimization.")
+                        st.stop()
+
+                    # Prepare data
+                    try:
+                        item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                        price_dict = df_to_dict_price(sheet_dfs["Price"])
+                        demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
+                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
+                        capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
+                        rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
+                        discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
+                        supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                        suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                    except Exception as e:
+                        st.error(f"Error preparing data for scenario runs: {e}")
+                        st.stop()
+
+                    from io import BytesIO
+                    scenario_results_dict = {}
+                    infeasible_scenarios = []
+
+                    with st.spinner("Running all scenarios..."):
+                        for scenario_nm, the_rules in st.session_state["scenario_definitions"].items():
+                            try:
+                                out_file, feas_notes, status = run_optimization(
+                                    capacity_data=capacity_dict,
+                                    demand_data=demand_dict,
+                                    item_attr_data=item_attr_dict,
+                                    price_data=price_dict,
+                                    rebate_tiers=rebate_tiers_dict,
+                                    discount_tiers=discount_tiers_dict,
+                                    baseline_price_data=baseline_price_dict,
+                                    rules=the_rules,
+                                    supplier_bid_attr_dict=supplier_bid_attr_dict,
+                                    suppliers=suppliers
+                                )
+
+                                if status == "Infeasible":
+                                    infeasible_scenarios.append(scenario_nm)
+
+                                # Attempt to read “Results” sheet; if fails or infeasible, produce empty DF
+                                try:
+                                    df_res = pd.read_excel(out_file, sheet_name="Results")
+                                except Exception:
+                                    df_res = pd.DataFrame()
+
+                                scenario_results_dict[scenario_nm] = df_res
+                            except Exception as e:
+                                st.warning(f"Scenario '{scenario_nm}' failed: {e}")
+                                # Insert an empty DF for this scenario
+                                scenario_results_dict[scenario_nm] = pd.DataFrame()
+
+                    # Now compile them into a single Excel
+                    if scenario_results_dict:
+                        combined_buf = BytesIO()
+                        with pd.ExcelWriter(combined_buf, engine="openpyxl") as writer:
+                            for s_name, df_scen in scenario_results_dict.items():
+                                safe_sname = s_name[:31]
+                                df_scen.to_excel(writer, sheet_name=safe_sname, index=False)
+                        combined_buf.seek(0)
+
+                        st.download_button(
+                            label="Download All Scenario Results",
+                            data=combined_buf.getvalue(),
+                            file_name="all_scenarios_results.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                        st.success("All scenario results have been combined into one Excel file.")
+
+                        if infeasible_scenarios:
+                            st.warning(
+                                "Some scenarios were infeasible: "
+                                + ", ".join(infeasible_scenarios)
+                                + ". Their sheets will be empty or partial."
+                            )
+                    else:
+                        st.error("No scenario produced valid results.")
+
+            # Final check that required sheets exist for anything else
+            required_sheet_names = [
+                "Item Attributes", "Price", "Demand", "Rebate Tiers", 
+                "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+            ]
+            missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
+            if missing_sheets:
+                st.error(
+                    f"Missing required sheets: {', '.join(missing_sheets)}. "
+                    "Please upload an Excel file that contains all of these sheets."
+                )
+                st.stop()
+
+
+
 
     elif section == 'upload':
         st.title('Start a New Analysis')
