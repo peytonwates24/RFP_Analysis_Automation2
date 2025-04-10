@@ -87,11 +87,25 @@ def df_to_dict_price(df):
     return d
 
 def df_to_dict_baseline_price(df):
+    """
+    Reads a DataFrame with columns ["Bid ID", "Baseline Price", "Current Price"] 
+    and returns a dictionary:
+      {
+        normalized_bid_id: {
+          "baseline": <float>,
+          "current": <float>
+        }
+      }
+    """
     d = {}
     for _, row in df.iterrows():
         bid = normalize_bid_id(row["Bid ID"])
-        d[bid] = row["Baseline Price"]
-    return d
+        baseline_val = row.get("Baseline Price", 0.0)
+        current_val  = row.get("Current Price", 0.0)
+        d[bid] = {
+            "baseline": baseline_val,
+            "current": current_val
+        }
 
 def df_to_dict_capacity(df):
     d = {}
@@ -789,8 +803,12 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     #############################################
     # PREPARE RESULTS
     #############################################
+    #############################################
+    # PREPARE RESULTS
+    #############################################
     excel_rows = []
     letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
     for idx, j in enumerate(items_dynamic, start=1):
         awarded_list = []
         for s in suppliers:
@@ -802,33 +820,53 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         if not awarded_list:
             awarded_list = [("No Bid", 0)]
         awarded_list.sort(key=lambda tup: (-tup[1], tup[0]))
+
+        # Here we pull the baseline/current from baseline_price_data:
+        price_info = baseline_price_data[normalize_bid_id(j)]
+        base_price = price_info["baseline"]
+        current_price = price_info["current"]
+
+        # We'll use these for each awarded supplier
         for i, (s, award_val) in enumerate(awarded_list):
             bid_split = letter_list[i] if i < len(letter_list) else f"Split{i+1}"
+
             orig_price = price_data.get((s, j), 0)
+
+            # Check discount (if any) for this supplier
             active_discount = 0
             for k, tier in enumerate(discount_tiers.get(s, [])):
                 if pulp.value(z_discount[s][k]) is not None and pulp.value(z_discount[s][k]) >= 0.5:
                     active_discount = tier[2]
                     break
             discount_pct = active_discount
+
             discounted_price = orig_price * (1 - discount_pct)
             awarded_spend = discounted_price * award_val
-            base_price = baseline_price_data[normalize_bid_id(j)]
+
+            # For baseline & current spend
             baseline_spend = base_price * award_val
+            current_spend  = current_price * award_val
+
             baseline_savings = baseline_spend - awarded_spend
+            current_price_savings = current_spend - awarded_spend
+
+            # Check rebate (if any)
             active_rebate = 0
             for k, tier in enumerate(rebate_tiers.get(s, [])):
                 if pulp.value(y_rebate[s][k]) is not None and pulp.value(y_rebate[s][k]) >= 0.5:
                     active_rebate = tier[2]
                     break
             rebate_savings = awarded_spend * active_rebate
+
             facility_val = item_attr_data[normalize_bid_id(j)].get("Facility", "")
+
             row = {
                 "Bid ID": idx,
                 "Bid ID Split": bid_split,
                 "Facility": facility_val,
                 "Incumbent": item_attr_data[normalize_bid_id(j)].get("Incumbent", ""),
                 "Baseline Price": base_price,
+                "Current Price": current_price,
                 "Baseline Spend": baseline_spend,
                 "Awarded Supplier": s,
                 "Original Awarded Supplier Price": orig_price,
@@ -837,38 +875,58 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 "Awarded Supplier Spend": awarded_spend,
                 "Awarded Volume": award_val,
                 "Baseline Savings": baseline_savings,
+                "Current Price Savings": current_price_savings,
                 "Rebate %": f"{active_rebate*100:.0f}%" if active_rebate else "0%",
                 "Rebate Savings": rebate_savings
             }
             excel_rows.append(row)
-    
+
     df_results = pd.DataFrame(excel_rows)
-    cols = ["Bid ID", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
-            "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
-            "Discounted Awarded Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
-            "Baseline Savings", "Rebate %", "Rebate Savings"]
+
+    # Now specify the EXACT column order including the new ones:
+    cols = [
+        "Bid ID",
+        "Bid ID Split",
+        "Facility",
+        "Incumbent",
+        "Baseline Price",
+        "Current Price",
+        "Baseline Spend",
+        "Awarded Supplier",
+        "Original Awarded Supplier Price",
+        "Percentage Volume Discount",
+        "Discounted Awarded Supplier Price",
+        "Awarded Supplier Spend",
+        "Awarded Volume",
+        "Baseline Savings",
+        "Current Price Savings",
+        "Rebate %",
+        "Rebate Savings"
+    ]
     df_results = df_results[cols]
-    
+
+    # Everything else remains the same
     df_feasibility = pd.DataFrame({"Feasibility Notes": [feasibility_notes]})
     temp_lp_file = os.path.join(os.getcwd(), "temp_model.lp")
     lp_problem.writeLP(temp_lp_file)
     with open(temp_lp_file, "r") as f:
         lp_text = f.read()
     df_lp = pd.DataFrame({"LP Model": [lp_text]})
-    
+
     output_file = os.path.join(os.getcwd(), "optimization_results.xlsx")
     capacity_df = pd.DataFrame([
         {"Supplier Name": s, "Capacity Scope": cs, "Scope Value": sv, "Capacity": cap}
         for (s, cs, sv), cap in capacity_data.items()
     ])
-    
+
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df_results.to_excel(writer, sheet_name="Results", index=False)
         df_feasibility.to_excel(writer, sheet_name="Feasibility Notes", index=False)
         df_lp.to_excel(writer, sheet_name="LP Model", index=False)
         capacity_df.to_excel(writer, sheet_name="Capacity", index=False)
-    
+
     return output_file, feasibility_notes, model_status
+
 
 if __name__ == "__main__":
     print("Optimization module loaded. Please call run_optimization() from your Streamlit app.")
