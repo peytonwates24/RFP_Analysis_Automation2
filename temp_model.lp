@@ -4,56 +4,6 @@ OBJ: S_Supplier_1 + S_Supplier_2 + S_Supplier_3 + S_Supplier_4 + S_Supplier_5
  - rebate_Supplier_1 - rebate_Supplier_2 - rebate_Supplier_3
  - rebate_Supplier_4 - rebate_Supplier_5
 Subject To
-%VolAwarded_Agg_0_Supplier_1_LB: 0.5 x_Supplier_1_1 + 0.5 x_Supplier_1_2
- + 0.5 x_Supplier_1_3 + 0.5 x_Supplier_1_4 + 0.5 x_Supplier_1_5
- - 0.5 x_Supplier_2_1 - 0.5 x_Supplier_2_2 - 0.5 x_Supplier_2_3
- - 0.5 x_Supplier_2_4 - 0.5 x_Supplier_2_5 - 0.5 x_Supplier_3_1
- - 0.5 x_Supplier_3_2 - 0.5 x_Supplier_3_3 - 0.5 x_Supplier_3_4
- - 0.5 x_Supplier_3_5 - 0.5 x_Supplier_4_1 - 0.5 x_Supplier_4_2
- - 0.5 x_Supplier_4_3 - 0.5 x_Supplier_4_4 - 0.5 x_Supplier_4_5
- - 0.5 x_Supplier_5_1 - 0.5 x_Supplier_5_2 - 0.5 x_Supplier_5_3
- - 0.5 x_Supplier_5_4 - 0.5 x_Supplier_5_5 - 1000000000 y_0_Supplier_1
- >= -1000000000
-%VolAwarded_Agg_0_Supplier_2_LB: - 0.5 x_Supplier_1_1 - 0.5 x_Supplier_1_2
- - 0.5 x_Supplier_1_3 - 0.5 x_Supplier_1_4 - 0.5 x_Supplier_1_5
- + 0.5 x_Supplier_2_1 + 0.5 x_Supplier_2_2 + 0.5 x_Supplier_2_3
- + 0.5 x_Supplier_2_4 + 0.5 x_Supplier_2_5 - 0.5 x_Supplier_3_1
- - 0.5 x_Supplier_3_2 - 0.5 x_Supplier_3_3 - 0.5 x_Supplier_3_4
- - 0.5 x_Supplier_3_5 - 0.5 x_Supplier_4_1 - 0.5 x_Supplier_4_2
- - 0.5 x_Supplier_4_3 - 0.5 x_Supplier_4_4 - 0.5 x_Supplier_4_5
- - 0.5 x_Supplier_5_1 - 0.5 x_Supplier_5_2 - 0.5 x_Supplier_5_3
- - 0.5 x_Supplier_5_4 - 0.5 x_Supplier_5_5 - 1000000000 y_0_Supplier_2
- >= -1000000000
-%VolAwarded_Agg_0_Supplier_3_LB: - 0.5 x_Supplier_1_1 - 0.5 x_Supplier_1_2
- - 0.5 x_Supplier_1_3 - 0.5 x_Supplier_1_4 - 0.5 x_Supplier_1_5
- - 0.5 x_Supplier_2_1 - 0.5 x_Supplier_2_2 - 0.5 x_Supplier_2_3
- - 0.5 x_Supplier_2_4 - 0.5 x_Supplier_2_5 + 0.5 x_Supplier_3_1
- + 0.5 x_Supplier_3_2 + 0.5 x_Supplier_3_3 + 0.5 x_Supplier_3_4
- + 0.5 x_Supplier_3_5 - 0.5 x_Supplier_4_1 - 0.5 x_Supplier_4_2
- - 0.5 x_Supplier_4_3 - 0.5 x_Supplier_4_4 - 0.5 x_Supplier_4_5
- - 0.5 x_Supplier_5_1 - 0.5 x_Supplier_5_2 - 0.5 x_Supplier_5_3
- - 0.5 x_Supplier_5_4 - 0.5 x_Supplier_5_5 - 1000000000 y_0_Supplier_3
- >= -1000000000
-%VolAwarded_Agg_0_Supplier_4_LB: - 0.5 x_Supplier_1_1 - 0.5 x_Supplier_1_2
- - 0.5 x_Supplier_1_3 - 0.5 x_Supplier_1_4 - 0.5 x_Supplier_1_5
- - 0.5 x_Supplier_2_1 - 0.5 x_Supplier_2_2 - 0.5 x_Supplier_2_3
- - 0.5 x_Supplier_2_4 - 0.5 x_Supplier_2_5 - 0.5 x_Supplier_3_1
- - 0.5 x_Supplier_3_2 - 0.5 x_Supplier_3_3 - 0.5 x_Supplier_3_4
- - 0.5 x_Supplier_3_5 + 0.5 x_Supplier_4_1 + 0.5 x_Supplier_4_2
- + 0.5 x_Supplier_4_3 + 0.5 x_Supplier_4_4 + 0.5 x_Supplier_4_5
- - 0.5 x_Supplier_5_1 - 0.5 x_Supplier_5_2 - 0.5 x_Supplier_5_3
- - 0.5 x_Supplier_5_4 - 0.5 x_Supplier_5_5 - 1000000000 y_0_Supplier_4
- >= -1000000000
-%VolAwarded_Agg_0_Supplier_5_LB: - 0.5 x_Supplier_1_1 - 0.5 x_Supplier_1_2
- - 0.5 x_Supplier_1_3 - 0.5 x_Supplier_1_4 - 0.5 x_Supplier_1_5
- - 0.5 x_Supplier_2_1 - 0.5 x_Supplier_2_2 - 0.5 x_Supplier_2_3
- - 0.5 x_Supplier_2_4 - 0.5 x_Supplier_2_5 - 0.5 x_Supplier_3_1
- - 0.5 x_Supplier_3_2 - 0.5 x_Supplier_3_3 - 0.5 x_Supplier_3_4
- - 0.5 x_Supplier_3_5 - 0.5 x_Supplier_4_1 - 0.5 x_Supplier_4_2
- - 0.5 x_Supplier_4_3 - 0.5 x_Supplier_4_4 - 0.5 x_Supplier_4_5
- + 0.5 x_Supplier_5_1 + 0.5 x_Supplier_5_2 + 0.5 x_Supplier_5_3
- + 0.5 x_Supplier_5_4 + 0.5 x_Supplier_5_5 - 1000000000 y_0_Supplier_5
- >= -1000000000
 ActiveLink_Supplier_1_1: x_Supplier_1_1 - 1000000000 z_Supplier_1 <= 0
 ActiveLink_Supplier_1_2: x_Supplier_1_2 - 1000000000 z_Supplier_1 <= 0
 ActiveLink_Supplier_1_3: x_Supplier_1_3 - 1000000000 z_Supplier_1 <= 0
@@ -79,16 +29,6 @@ ActiveLink_Supplier_5_2: x_Supplier_5_2 - 1000000000 z_Supplier_5 <= 0
 ActiveLink_Supplier_5_3: x_Supplier_5_3 - 1000000000 z_Supplier_5 <= 0
 ActiveLink_Supplier_5_4: x_Supplier_5_4 - 1000000000 z_Supplier_5 <= 0
 ActiveLink_Supplier_5_5: x_Supplier_5_5 - 1000000000 z_Supplier_5 <= 0
-Active_0_Supplier_1: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
- + x_Supplier_1_4 + x_Supplier_1_5 - 1000000000 y_0_Supplier_1 <= 0
-Active_0_Supplier_2: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
- + x_Supplier_2_4 + x_Supplier_2_5 - 1000000000 y_0_Supplier_2 <= 0
-Active_0_Supplier_3: x_Supplier_3_1 + x_Supplier_3_2 + x_Supplier_3_3
- + x_Supplier_3_4 + x_Supplier_3_5 - 1000000000 y_0_Supplier_3 <= 0
-Active_0_Supplier_4: x_Supplier_4_1 + x_Supplier_4_2 + x_Supplier_4_3
- + x_Supplier_4_4 + x_Supplier_4_5 - 1000000000 y_0_Supplier_4 <= 0
-Active_0_Supplier_5: x_Supplier_5_1 + x_Supplier_5_2 + x_Supplier_5_3
- + x_Supplier_5_4 + x_Supplier_5_5 - 1000000000 y_0_Supplier_5 <= 0
 BaseSpend_Supplier_1: S0_Supplier_1 - 34 x_Supplier_1_1 - 15 x_Supplier_1_2
  - 15 x_Supplier_1_3 - 75 x_Supplier_1_4 - 24 x_Supplier_1_5 = 0
 BaseSpend_Supplier_2: S0_Supplier_2 - 14 x_Supplier_2_1 - 15 x_Supplier_2_2
@@ -132,11 +72,16 @@ Demand_4: x_Supplier_1_4 + x_Supplier_2_4 + x_Supplier_3_4 + x_Supplier_4_4
  + x_Supplier_5_4 = 2357
 Demand_5: x_Supplier_1_5 + x_Supplier_2_5 + x_Supplier_3_5 + x_Supplier_4_5
  + x_Supplier_5_5 = 2421
-EffectiveSpend_Supplier_1: - S0_Supplier_1 + S_Supplier_1 + d_Supplier_1 = 0
-EffectiveSpend_Supplier_2: - S0_Supplier_2 + S_Supplier_2 + d_Supplier_2 = 0
-EffectiveSpend_Supplier_3: - S0_Supplier_3 + S_Supplier_3 + d_Supplier_3 = 0
-EffectiveSpend_Supplier_4: - S0_Supplier_4 + S_Supplier_4 + d_Supplier_4 = 0
-EffectiveSpend_Supplier_5: - S0_Supplier_5 + S_Supplier_5 + d_Supplier_5 = 0
+EffectiveSpend_Supplier_1: - F_Supplier_1 - S0_Supplier_1 + S_Supplier_1
+ + d_Supplier_1 = 0
+EffectiveSpend_Supplier_2: - F_Supplier_2 - S0_Supplier_2 + S_Supplier_2
+ + d_Supplier_2 = 0
+EffectiveSpend_Supplier_3: - F_Supplier_3 - S0_Supplier_3 + S_Supplier_3
+ + d_Supplier_3 = 0
+EffectiveSpend_Supplier_4: - F_Supplier_4 - S0_Supplier_4 + S_Supplier_4
+ + d_Supplier_4 = 0
+EffectiveSpend_Supplier_5: - F_Supplier_5 - S0_Supplier_5 + S_Supplier_5
+ + d_Supplier_5 = 0
 Fix_d_Supplier_1: d_Supplier_1 = 0
 Fix_d_Supplier_2: d_Supplier_2 = 0
 Fix_d_Supplier_3: d_Supplier_3 = 0
@@ -147,16 +92,16 @@ Fix_rebate_Supplier_2: rebate_Supplier_2 = 0
 Fix_rebate_Supplier_3: rebate_Supplier_3 = 0
 Fix_rebate_Supplier_4: rebate_Supplier_4 = 0
 Fix_rebate_Supplier_5: rebate_Supplier_5 = 0
-MinActive_0_Supplier_1: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
- + x_Supplier_1_4 + x_Supplier_1_5 >= 0
-MinActive_0_Supplier_2: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
- + x_Supplier_2_4 + x_Supplier_2_5 >= 0
-MinActive_0_Supplier_3: x_Supplier_3_1 + x_Supplier_3_2 + x_Supplier_3_3
- + x_Supplier_3_4 + x_Supplier_3_5 >= 0
-MinActive_0_Supplier_4: x_Supplier_4_1 + x_Supplier_4_2 + x_Supplier_4_3
- + x_Supplier_4_4 + x_Supplier_4_5 >= 0
-MinActive_0_Supplier_5: x_Supplier_5_1 + x_Supplier_5_2 + x_Supplier_5_3
- + x_Supplier_5_4 + x_Supplier_5_5 >= 0
+Freight_Supplier_1: F_Supplier_1 - 21 x_Supplier_1_1 - 22 x_Supplier_1_2
+ - 22 x_Supplier_1_3 - 22 x_Supplier_1_4 - 20 x_Supplier_1_5 = 0
+Freight_Supplier_2: F_Supplier_2 - 18 x_Supplier_2_1 - 14 x_Supplier_2_2
+ - 19 x_Supplier_2_3 - 19 x_Supplier_2_4 - 14 x_Supplier_2_5 = 0
+Freight_Supplier_3: F_Supplier_3 - 23 x_Supplier_3_1 - 25 x_Supplier_3_2
+ - 27 x_Supplier_3_3 - 27 x_Supplier_3_4 - 27 x_Supplier_3_5 = 0
+Freight_Supplier_4: F_Supplier_4 - 20 x_Supplier_4_1 - 15 x_Supplier_4_2
+ - 18 x_Supplier_4_3 - 20 x_Supplier_4_4 - 19 x_Supplier_4_5 = 0
+Freight_Supplier_5: F_Supplier_5 - 30 x_Supplier_5_1 - 32 x_Supplier_5_2
+ - 32 x_Supplier_5_3 - 32 x_Supplier_5_4 - 27 x_Supplier_5_5 = 0
 MinAward_Supplier_1: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
  + x_Supplier_1_4 + x_Supplier_1_5 - z_Supplier_1 >= 0
 MinAward_Supplier_2: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
@@ -238,11 +183,6 @@ T_5_Supplier_1
 T_5_Supplier_2
 T_5_Supplier_4
 T_5_Supplier_5
-y_0_Supplier_1
-y_0_Supplier_2
-y_0_Supplier_3
-y_0_Supplier_4
-y_0_Supplier_5
 z_Supplier_1
 z_Supplier_2
 z_Supplier_3

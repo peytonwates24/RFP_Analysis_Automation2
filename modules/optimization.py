@@ -24,7 +24,7 @@ EPS = 0.0
 #############################################
 REQUIRED_COLUMNS = {
     "Item Attributes": ["Bid ID", "Incumbent"],
-    "Price": ["Supplier Name", "Bid ID", "Price"],
+    "Price": ["Supplier Name", "Bid ID", "Price", "EXW", "DDP", "KBX"],
     "Demand": ["Bid ID", "Demand"],
     "Baseline Price": ["Bid ID", "Baseline Price"],
     "Capacity": ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
@@ -34,7 +34,7 @@ REQUIRED_COLUMNS = {
 }
 
 #############################################
-# Helper Functions (unchanged)
+# Helper Functions (unchanged, except df_to_dict_price)
 #############################################
 def load_excel_sheets(uploaded_file):
     xls = pd.ExcelFile(uploaded_file)
@@ -75,16 +75,31 @@ def df_to_dict_demand(df):
         d[bid] = row["Demand"]
     return d
 
+# --- NEW: Updated Price sheet parser ---
 def df_to_dict_price(df):
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
         bid = normalize_bid_id(row["Bid ID"])
-        price = row["Price"]
-        if pd.isna(price) or price == 0:
+        base_price = row["Price"]
+        if pd.isna(base_price) or base_price == 0:
             continue
-        d[(supplier, bid)] = price
+        # Extract additional freight fields; default to 0 if missing.
+        exw = 0 if pd.isna(row.get("EXW", 0)) else row.get("EXW", 0)
+        ddp = 0 if pd.isna(row.get("DDP", 0)) else row.get("DDP", 0)
+        kbx = 0 if pd.isna(row.get("KBX", 0)) else row.get("KBX", 0)
+        # Compute freight rate as the lower of DDP versus (EXW + KBX)
+        freight_rate = min(ddp, exw + kbx)
+        # Store all the details in the dictionary.
+        d[(supplier, bid)] = {
+            "base_price": base_price,
+            "EXW": exw,
+            "DDP": ddp,
+            "KBX": kbx,
+            "freight": freight_rate
+        }
     return d
+
 
 def df_to_dict_baseline_price(df):
     d = {}
@@ -223,7 +238,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     
     # For each Bid ID in demand, if no supplier has a nonzero bid, set its demand to zero.
     for bid in list(demand_data.keys()):
-        has_valid_bid = any(price_data.get((s, bid), 0) != 0 for s in suppliers)
+        has_valid_bid = any(price_data.get((s, bid), {"base_price": 0})["base_price"] != 0 for s in suppliers)
         if not has_valid_bid:
             demand_data[bid] = 0
 
@@ -250,6 +265,9 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     S0 = {s: pulp.LpVariable(f"S0_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     S = {s: pulp.LpVariable(f"S_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     V = {s: pulp.LpVariable(f"V_{s}", lowBound=0, cat='Continuous') for s in suppliers}
+    
+    # New variable for freight cost per supplier
+    F = {s: pulp.LpVariable(f"F_{s}", lowBound=0, cat='Continuous') for s in suppliers}
     
     # --- Global Minimum Award Constraint: if any volume is awarded to supplier s then total must be >= 1 ---
     z = {s: pulp.LpVariable(f"z_{s}", cat='Binary') for s in suppliers}
@@ -286,12 +304,13 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         if items_group:
             lp_problem += pulp.lpSum(x[(s, j)] for j in items_group) <= cap, f"Capacity_{s}_{cap_scope}_{scope_value}"
     
-    # --- Base spend and volume ---
+    # --- Base spend and freight cost ---
     for s in suppliers:
-        lp_problem += S0[s] == pulp.lpSum(price_data.get((s, j), 0) * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
+        lp_problem += S0[s] == pulp.lpSum(price_data.get((s, j), {"base_price": 0})["base_price"] * x[(s, j)] for j in items_dynamic), f"BaseSpend_{s}"
+        lp_problem += F[s] == pulp.lpSum(price_data.get((s, j), {"freight": 0})["freight"] * x[(s, j)] for j in items_dynamic), f"Freight_{s}"
         lp_problem += V[s] == pulp.lpSum(x[(s, j)] for j in items_dynamic), f"Volume_{s}"
     
-    max_price_val = max(price_data.values()) if price_data else 0
+    max_price_val = max([price_info["base_price"] for price_info in price_data.values()]) if price_data else 0
     U_spend = {}
     for s in suppliers:
         total_cap = sum(cap for ((sup, _, _), cap) in capacity_data.items() if sup == s)
@@ -308,7 +327,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             feasible_tiers = []
             for k, tier in enumerate(tiers):
                 Dmin, Dmax, Dperc, scope_attr, scope_value = tier
-                # Convert scope values to strings before stripping
                 if scope_attr is None or scope_value is None or str(scope_attr).strip() == "" or str(scope_value).strip().upper() == "ALL":
                     total_possible = sum(demand_data[j] for j in items_dynamic)
                 else:
@@ -363,6 +381,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             lp_problem += rebate_var[s] == 0, f"Fix_rebate_{s}"
     
     # --- Objective ---
+    # The effective spend S[s] now comes from the discounted base price (S0[s] - d[s]) plus freight cost F[s].
     lp_problem += pulp.lpSum(S[s] - rebate_var[s] for s in suppliers), "Total_Effective_Cost"
     
     # --- Discount Tier constraints ---
@@ -384,7 +403,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             lp_problem += d[s] >= Dperc * S0[s] - M_discount * (1 - z_discount[s][k]), f"DiscountTierLower_{s}_{k}"
             lp_problem += d[s] <= Dperc * S0[s] + M_discount * (1 - z_discount[s][k]), f"DiscountTierUpper_{s}_{k}"
     for s in suppliers:
-        lp_problem += S[s] == S0[s] - d[s], f"EffectiveSpend_{s}"
+        # Incorporate the freight cost: effective spend is base spend minus discount plus freight.
+        lp_problem += S[s] == S0[s] - d[s] + F[s], f"EffectiveSpend_{s}"
     
     # --- Rebate Tier constraints ---
     for s in suppliers:
@@ -412,17 +432,20 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         prices = []
         for s in suppliers:
             if (s, j) in price_data:
-                prices.append((price_data[(s, j)], s))
+                price_info = price_data[(s, j)]
+                base_price = price_info["base_price"]
+                # For comparing bids we simply sort by the base bid price.
+                prices.append((base_price, s))
         if prices:
             prices.sort(key=lambda x: x[0])
             lowest_cost_supplier[j] = prices[0][1]
             second_lowest_cost_supplier[j] = prices[1][1] if len(prices) > 1 else prices[0][1]
     
     #############################################
-    # CUSTOM RULES PROCESSING
+    # CUSTOM RULES PROCESSING (unchanged)
     #############################################
     for r_idx, rule in enumerate(rules):
-        # "# of Suppliers" rule.
+        # (Custom rules processing unchanged for brevity.)
         if rule["rule_type"].lower() == "# of suppliers":
             try:
                 supplier_target = int(rule["rule_input"])
@@ -762,7 +785,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                     lp_problem += x[(rule["supplier_scope"].strip(), norm_j)] == 0, f"SupplierExclusion_{r_idx}_{norm_j}"
         # ... (Other rule branches remain unchanged) ...
     
-    #############################################
+ #############################################
     # DEBUG OUTPUT and Solve
     #############################################
     constraint_names = list(lp_problem.constraints.keys())
@@ -782,7 +805,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         feasibility_notes += " - Insufficient supplier capacity relative to demand.\n"
         feasibility_notes += " - Custom rule constraints conflicting with overall volume/demand.\n\n"
         feasibility_notes += "Detailed Rule Evaluations:\n"
-        # (Detailed rule evaluation omitted for brevity)
     else:
         feasibility_notes = "Model is optimal."
     
@@ -804,24 +826,46 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         awarded_list.sort(key=lambda tup: (-tup[1], tup[0]))
         for i, (s, award_val) in enumerate(awarded_list):
             bid_split = letter_list[i] if i < len(letter_list) else f"Split{i+1}"
-            orig_price = price_data.get((s, j), 0)
+            price_info = price_data.get((s, j))
+            if not price_info:
+                orig_price = 0
+                freight_rate = 0
+                ddp = exw = kbx = 0
+            else:
+                orig_price = price_info["base_price"]
+                freight_rate = price_info["freight"]
+                ddp = price_info.get("DDP", 0)
+                exw = price_info.get("EXW", 0)
+                kbx = price_info.get("KBX", 0)
+            # Decide which freight method is selected:
+            if ddp <= (exw + kbx):
+                freight_method = "DDP"
+            else:
+                freight_method = "EXW + KBX"
+
             active_discount = 0
             for k, tier in enumerate(discount_tiers.get(s, [])):
                 if pulp.value(z_discount[s][k]) is not None and pulp.value(z_discount[s][k]) >= 0.5:
                     active_discount = tier[2]
                     break
             discount_pct = active_discount
+            # Compute the discounted price (before freight)
             discounted_price = orig_price * (1 - discount_pct)
-            awarded_spend = discounted_price * award_val
+            # Compute the effective price (discounted price plus freight)
+            effective_price = discounted_price + freight_rate
+            awarded_spend = effective_price * award_val
+
             base_price = baseline_price_data[normalize_bid_id(j)]
             baseline_spend = base_price * award_val
             baseline_savings = baseline_spend - awarded_spend
+
             active_rebate = 0
             for k, tier in enumerate(rebate_tiers.get(s, [])):
                 if pulp.value(y_rebate[s][k]) is not None and pulp.value(y_rebate[s][k]) >= 0.5:
                     active_rebate = tier[2]
                     break
             rebate_savings = awarded_spend * active_rebate
+
             facility_val = item_attr_data[normalize_bid_id(j)].get("Facility", "")
             row = {
                 "Bid ID": idx,
@@ -833,7 +877,10 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 "Awarded Supplier": s,
                 "Original Awarded Supplier Price": orig_price,
                 "Percentage Volume Discount": f"{discount_pct*100:.0f}%" if discount_pct else "0%",
-                "Discounted Awarded Supplier Price": discounted_price,
+                "Discounted Supplier Price": discounted_price,    # New column: price after discount only.
+                "Freight Method": freight_method,
+                "Freight Amount": freight_rate,
+                "Effective Supplier Price": effective_price,       # New column: discounted price plus freight.
                 "Awarded Supplier Spend": awarded_spend,
                 "Awarded Volume": award_val,
                 "Baseline Savings": baseline_savings,
@@ -841,13 +888,18 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 "Rebate Savings": rebate_savings
             }
             excel_rows.append(row)
+
     
     df_results = pd.DataFrame(excel_rows)
-    cols = ["Bid ID", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
-            "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
-            "Discounted Awarded Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
-            "Baseline Savings", "Rebate %", "Rebate Savings"]
+    cols = [
+        "Bid ID", "Bid ID Split", "Facility", "Incumbent", "Baseline Price", "Baseline Spend",
+        "Awarded Supplier", "Original Awarded Supplier Price", "Percentage Volume Discount",
+        "Discounted Supplier Price", "Freight Method", "Freight Amount",
+        "Effective Supplier Price", "Awarded Supplier Spend", "Awarded Volume",
+        "Baseline Savings", "Rebate %", "Rebate Savings"
+    ]
     df_results = df_results[cols]
+
     
     df_feasibility = pd.DataFrame({"Feasibility Notes": [feasibility_notes]})
     temp_lp_file = os.path.join(os.getcwd(), "temp_model.lp")
