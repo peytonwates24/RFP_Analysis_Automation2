@@ -84,13 +84,31 @@ def df_to_dict_price(df):
         base_price = row["Price"]
         if pd.isna(base_price) or base_price == 0:
             continue
-        # Extract additional freight fields; default to 0 if missing.
-        exw = 0 if pd.isna(row.get("EXW", 0)) else row.get("EXW", 0)
-        ddp = 0 if pd.isna(row.get("DDP", 0)) else row.get("DDP", 0)
-        kbx = 0 if pd.isna(row.get("KBX", 0)) else row.get("KBX", 0)
-        # Compute freight rate as the lower of DDP versus (EXW + KBX)
-        freight_rate = min(ddp, exw + kbx)
-        # Store all the details in the dictionary.
+        
+        # Read the freight values; assign 0 if missing
+        exw_raw = row.get("EXW", None)
+        ddp_raw = row.get("DDP", None)
+        kbx_raw = row.get("KBX", 0)  # KBX is usually provided by us
+
+        # Normalize the values:
+        exw = 0 if exw_raw is None or pd.isna(exw_raw) else exw_raw
+        ddp = 0 if ddp_raw is None or pd.isna(ddp_raw) else ddp_raw
+        kbx = 0 if kbx_raw is None or pd.isna(kbx_raw) else kbx_raw
+
+        # New Logic:
+        # - If EXW is missing/0 but DDP is provided (>0), use DDP.
+        # - Else if DDP is missing/0 but EXW is provided, use EXW+KBX.
+        # - Else if both are provided (>0), choose the minimum of DDP and (EXW+KBX).
+        # - Otherwise, set freight_rate to 0.
+        if exw == 0 and ddp > 0:
+            freight_rate = ddp
+        elif ddp == 0 and exw > 0:
+            freight_rate = exw + kbx
+        elif ddp > 0 and exw > 0:
+            freight_rate = min(ddp, exw + kbx)
+        else:
+            freight_rate = 0
+
         d[(supplier, bid)] = {
             "base_price": base_price,
             "EXW": exw,
@@ -99,6 +117,7 @@ def df_to_dict_price(df):
             "freight": freight_rate
         }
     return d
+
 
 
 def df_to_dict_baseline_price(df):
