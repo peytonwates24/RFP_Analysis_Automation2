@@ -24,7 +24,7 @@ EPS = 0.0
 #############################################
 REQUIRED_COLUMNS = {
     "Item Attributes": ["Bid ID", "Incumbent"],
-    "Price": ["Supplier Name", "Bid ID", "Price", "EXW", "DDP", "KBX"],
+    "Price": ["Supplier Name", "Bid ID", "Price", "Supplier Freight", "KBX"],
     "Demand": ["Bid ID", "Demand"],
     "Baseline Price": ["Bid ID", "Baseline Price"],
     "Capacity": ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
@@ -76,47 +76,80 @@ def df_to_dict_demand(df):
     return d
 
 # --- NEW: Updated Price sheet parser ---
+import logging
+
 def df_to_dict_price(df):
     d = {}
     for _, row in df.iterrows():
         supplier = str(row["Supplier Name"]).strip()
         bid = normalize_bid_id(row["Bid ID"])
-        base_price = row["Price"]
-        if pd.isna(base_price) or base_price == 0:
-            continue
         
-        # Read the freight values; assign 0 if missing
-        exw_raw = row.get("EXW", None)
-        ddp_raw = row.get("DDP", None)
-        kbx_raw = row.get("KBX", 0)  # KBX is usually provided by us
+        # Parse the base price.
+        try:
+            base_price = float(row["Price"])
+        except Exception:
+            continue
+        if base_price == 0:
+            continue
 
-        # Normalize the values:
-        exw = 0 if exw_raw is None or pd.isna(exw_raw) else exw_raw
-        ddp = 0 if ddp_raw is None or pd.isna(ddp_raw) else ddp_raw
-        kbx = 0 if kbx_raw is None or pd.isna(kbx_raw) else kbx_raw
+        # Parse "Supplier Freight" – if blank or missing, set to 0.
+        try:
+            # If the cell is blank or NA, default to 0
+            supp_freight_val = row.get("Supplier Freight")
+            supp_freight = float(supp_freight_val) if supp_freight_val not in [None, ""] and not pd.isna(supp_freight_val) else 0.0
+        except Exception:
+            supp_freight = 0.0
 
-        # New Logic:
-        # - If EXW is missing/0 but DDP is provided (>0), use DDP.
-        # - Else if DDP is missing/0 but EXW is provided, use EXW+KBX.
-        # - Else if both are provided (>0), choose the minimum of DDP and (EXW+KBX).
-        # - Otherwise, set freight_rate to 0.
-        if exw == 0 and ddp > 0:
-            freight_rate = ddp
-        elif ddp == 0 and exw > 0:
-            freight_rate = exw + kbx
-        elif ddp > 0 and exw > 0:
-            freight_rate = min(ddp, exw + kbx)
+        # Parse "KBX" – if blank or missing, set to 0.
+        try:
+            kbx_val = row.get("KBX")
+            kbx = float(kbx_val) if kbx_val not in [None, ""] and not pd.isna(kbx_val) else 0.0
+        except Exception:
+            kbx = 0.0
+
+        # Compute the candidate effective prices:
+        # Option 1: DDP = Price + Supplier Freight
+        computed_ddp = base_price + supp_freight
+        # Option 2: GP Pickup = Price + KBX
+        computed_gp  = base_price + kbx
+
+        # Decision logic:
+        # - If KBX is 0 (i.e. missing or blank), then default to using Supplier Freight (i.e. DDP).
+        if kbx == 0:
+            chosen_adder = supp_freight
+            method = "DDP"
         else:
-            freight_rate = 0
+            # Otherwise, choose the lower add-on among Supplier Freight and KBX.
+            if supp_freight <= kbx:
+                chosen_adder = supp_freight
+                method = "DDP"
+            else:
+                chosen_adder = kbx
+                method = "GP Pickup"
+        
+        effective_price = base_price + chosen_adder
+
+        # Optionally, if a DDP column is provided for verification (not required), read it;
+        # otherwise, just use computed_ddp.
+        try:
+            provided_ddp_val = row.get("DDP")
+            provided_ddp = float(provided_ddp_val) if provided_ddp_val not in [None, ""] and not pd.isna(provided_ddp_val) else computed_ddp
+        except Exception:
+            provided_ddp = computed_ddp
 
         d[(supplier, bid)] = {
-            "base_price": base_price,
-            "EXW": exw,
-            "DDP": ddp,
-            "KBX": kbx,
-            "freight": freight_rate
+            "base_price": base_price,                   # Base Price value.
+            "Supplier Freight": supp_freight,             # Transportation add-on (for DDP).
+            "KBX": kbx,                                 # GP Pickup add-on.
+            "DDP": provided_ddp,                        # Provided DDP (for verification) or computed.
+            "computed_ddp": computed_ddp,               # Price + Supplier Freight.
+            "computed_gp": computed_gp,                 # Price + KBX.
+            "freight": chosen_adder,                    # The chosen add-on.
+            "freight_method": method,                   # "DDP" or "GP Pickup".
+            "effective_price": effective_price          # Price + chosen add-on.
         }
     return d
+
 
 
 
@@ -849,30 +882,25 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             if not price_info:
                 orig_price = 0
                 freight_rate = 0
-                ddp = exw = kbx = 0
+                freight_method = "None"
             else:
                 orig_price = price_info["base_price"]
+                # Use the computed 'freight' and 'freight_method' from df_to_dict_price
                 freight_rate = price_info["freight"]
-                ddp = price_info.get("DDP", 0)
-                exw = price_info.get("EXW", 0)
-                kbx = price_info.get("KBX", 0)
-            # Decide which freight method is selected:
-            if ddp <= (exw + kbx):
-                freight_method = "DDP"
-            else:
-                freight_method = "EXW + KBX"
-
+                freight_method = price_info.get("freight_method", "None")
+            
+            # Compute the discounted price (without freight)
             active_discount = 0
             for k, tier in enumerate(discount_tiers.get(s, [])):
                 if pulp.value(z_discount[s][k]) is not None and pulp.value(z_discount[s][k]) >= 0.5:
                     active_discount = tier[2]
                     break
             discount_pct = active_discount
-            # Compute the discounted price (before freight)
             discounted_price = orig_price * (1 - discount_pct)
-            # Compute the effective price (discounted price plus freight)
+            # Add freight cost to get the final effective price
             effective_price = discounted_price + freight_rate
             awarded_spend = effective_price * award_val
+
 
             base_price = baseline_price_data[normalize_bid_id(j)]
             baseline_spend = base_price * award_val
@@ -891,21 +919,22 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 "Bid ID Split": bid_split,
                 "Facility": facility_val,
                 "Incumbent": item_attr_data[normalize_bid_id(j)].get("Incumbent", ""),
-                "Baseline Price": base_price,
+                "Baseline Price": base_price,  # From baseline data
                 "Baseline Spend": baseline_spend,
                 "Awarded Supplier": s,
                 "Original Awarded Supplier Price": orig_price,
                 "Percentage Volume Discount": f"{discount_pct*100:.0f}%" if discount_pct else "0%",
-                "Discounted Supplier Price": discounted_price,    # New column: price after discount only.
-                "Freight Method": freight_method,
-                "Freight Amount": freight_rate,
-                "Effective Supplier Price": effective_price,       # New column: discounted price plus freight.
+                "Discounted Supplier Price": discounted_price,  # Price after discount only
+                "Freight Method": freight_method,               # Taken from the price_info dictionary
+                "Freight Amount": freight_rate,                 # The chosen add-on
+                "Effective Supplier Price": effective_price,    # Discounted price plus freight
                 "Awarded Supplier Spend": awarded_spend,
                 "Awarded Volume": award_val,
                 "Baseline Savings": baseline_savings,
                 "Rebate %": f"{active_rebate*100:.0f}%" if active_rebate else "0%",
                 "Rebate Savings": rebate_savings
             }
+
             excel_rows.append(row)
 
     

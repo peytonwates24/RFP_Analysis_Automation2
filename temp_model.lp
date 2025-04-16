@@ -72,6 +72,26 @@ Demand_4: x_Supplier_1_4 + x_Supplier_2_4 + x_Supplier_3_4 + x_Supplier_4_4
  + x_Supplier_5_4 = 2357
 Demand_5: x_Supplier_1_5 + x_Supplier_2_5 + x_Supplier_3_5 + x_Supplier_4_5
  + x_Supplier_5_5 = 2421
+DiscountTierLower_Supplier_1_0: - 0.05 S0_Supplier_1 + d_Supplier_1
+ - 1406346 z_discount_Supplier_1_0 >= -1406346
+DiscountTierLower_Supplier_2_0: - 0.1 S0_Supplier_2 + d_Supplier_2
+ - 1023279 z_discount_Supplier_2_0 >= -1023279
+DiscountTierMax_Supplier_1_0: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
+ + x_Supplier_1_4 + x_Supplier_1_5 + 1406346 z_discount_Supplier_1_0
+ <= 1411346
+DiscountTierMax_Supplier_2_0: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
+ + x_Supplier_2_4 + x_Supplier_2_5 + 1023279 z_discount_Supplier_2_0
+ <= 1025279
+DiscountTierMin_Supplier_1_0: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
+ + x_Supplier_1_4 + x_Supplier_1_5 >= 0
+DiscountTierMin_Supplier_2_0: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
+ + x_Supplier_2_4 + x_Supplier_2_5 >= 0
+DiscountTierSelect_Supplier_1: z_discount_Supplier_1_0 = 1
+DiscountTierSelect_Supplier_2: z_discount_Supplier_2_0 = 1
+DiscountTierUpper_Supplier_1_0: - 0.05 S0_Supplier_1 + d_Supplier_1
+ + 1406346 z_discount_Supplier_1_0 <= 1406346
+DiscountTierUpper_Supplier_2_0: - 0.1 S0_Supplier_2 + d_Supplier_2
+ + 1023279 z_discount_Supplier_2_0 <= 1023279
 EffectiveSpend_Supplier_1: - F_Supplier_1 - S0_Supplier_1 + S_Supplier_1
  + d_Supplier_1 = 0
 EffectiveSpend_Supplier_2: - F_Supplier_2 - S0_Supplier_2 + S_Supplier_2
@@ -82,8 +102,6 @@ EffectiveSpend_Supplier_4: - F_Supplier_4 - S0_Supplier_4 + S_Supplier_4
  + d_Supplier_4 = 0
 EffectiveSpend_Supplier_5: - F_Supplier_5 - S0_Supplier_5 + S_Supplier_5
  + d_Supplier_5 = 0
-Fix_d_Supplier_1: d_Supplier_1 = 0
-Fix_d_Supplier_2: d_Supplier_2 = 0
 Fix_d_Supplier_3: d_Supplier_3 = 0
 Fix_d_Supplier_4: d_Supplier_4 = 0
 Fix_d_Supplier_5: d_Supplier_5 = 0
@@ -92,16 +110,11 @@ Fix_rebate_Supplier_2: rebate_Supplier_2 = 0
 Fix_rebate_Supplier_3: rebate_Supplier_3 = 0
 Fix_rebate_Supplier_4: rebate_Supplier_4 = 0
 Fix_rebate_Supplier_5: rebate_Supplier_5 = 0
-Freight_Supplier_1: F_Supplier_1 - 21 x_Supplier_1_1 - 22 x_Supplier_1_2
- - 22 x_Supplier_1_3 - 22 x_Supplier_1_4 - 20 x_Supplier_1_5 = 0
-Freight_Supplier_2: F_Supplier_2 - 18 x_Supplier_2_1 - 14 x_Supplier_2_2
- - 19 x_Supplier_2_3 - 19 x_Supplier_2_4 - 14 x_Supplier_2_5 = 0
-Freight_Supplier_3: F_Supplier_3 - 23 x_Supplier_3_1 - 25 x_Supplier_3_2
- - 27 x_Supplier_3_3 - 27 x_Supplier_3_4 - 27 x_Supplier_3_5 = 0
-Freight_Supplier_4: F_Supplier_4 - 20 x_Supplier_4_1 - 15 x_Supplier_4_2
- - 18 x_Supplier_4_3 - 20 x_Supplier_4_4 - 19 x_Supplier_4_5 = 0
-Freight_Supplier_5: F_Supplier_5 - 30 x_Supplier_5_1 - 32 x_Supplier_5_2
- - 32 x_Supplier_5_3 - 32 x_Supplier_5_4 - 27 x_Supplier_5_5 = 0
+Freight_Supplier_1: F_Supplier_1 = 0
+Freight_Supplier_2: F_Supplier_2 = 0
+Freight_Supplier_3: F_Supplier_3 = 0
+Freight_Supplier_4: F_Supplier_4 = 0
+Freight_Supplier_5: F_Supplier_5 = 0
 MinAward_Supplier_1: x_Supplier_1_1 + x_Supplier_1_2 + x_Supplier_1_3
  + x_Supplier_1_4 + x_Supplier_1_5 - z_Supplier_1 >= 0
 MinAward_Supplier_2: x_Supplier_2_1 + x_Supplier_2_2 + x_Supplier_2_3
@@ -188,4 +201,6 @@ z_Supplier_2
 z_Supplier_3
 z_Supplier_4
 z_Supplier_5
+z_discount_Supplier_1_0
+z_discount_Supplier_2_0
 End
