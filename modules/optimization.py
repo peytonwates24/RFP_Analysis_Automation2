@@ -92,45 +92,49 @@ def df_to_dict_price(df):
         if base_price == 0:
             continue
 
-        # Parse "Supplier Freight" – if blank or missing, set to 0.
+        # Parse "Supplier Freight" – if blank or missing, treat as 0.
         try:
-            # If the cell is blank or NA, default to 0
             supp_freight_val = row.get("Supplier Freight")
             supp_freight = float(supp_freight_val) if supp_freight_val not in [None, ""] and not pd.isna(supp_freight_val) else 0.0
         except Exception:
             supp_freight = 0.0
 
-        # Parse "KBX" – if blank or missing, set to 0.
+        # Parse "KBX" – if blank or missing, treat as 0.
         try:
             kbx_val = row.get("KBX")
             kbx = float(kbx_val) if kbx_val not in [None, ""] and not pd.isna(kbx_val) else 0.0
         except Exception:
             kbx = 0.0
 
-        # Compute the candidate effective prices:
-        # Option 1: DDP = Price + Supplier Freight
-        computed_ddp = base_price + supp_freight
-        # Option 2: GP Pickup = Price + KBX
-        computed_gp  = base_price + kbx
+        # Compute candidate effective prices (for reference only):
+        computed_ddp = base_price + supp_freight   # DDP option
+        computed_gp  = base_price + kbx             # GP Pickup option
 
         # Decision logic:
-        # - If KBX is 0 (i.e. missing or blank), then default to using Supplier Freight (i.e. DDP).
-        if kbx == 0:
-            chosen_adder = supp_freight
-            method = "DDP"
-        else:
-            # Otherwise, choose the lower add-on among Supplier Freight and KBX.
+        # Case 1: Both are nonzero → pick the lower add-on.
+        # Case 2: If one is zero and the other is nonzero → force use of the nonzero one.
+        # Case 3: If both are zero → no freight cost.
+        if supp_freight > 0 and kbx > 0:
             if supp_freight <= kbx:
                 chosen_adder = supp_freight
                 method = "DDP"
             else:
                 chosen_adder = kbx
                 method = "GP Pickup"
-        
+        elif supp_freight == 0 and kbx > 0:
+            chosen_adder = kbx
+            method = "GP Pickup"
+        elif kbx == 0 and supp_freight > 0:
+            chosen_adder = supp_freight
+            method = "DDP"
+        else:
+            chosen_adder = 0.0
+            method = "None"
+
         effective_price = base_price + chosen_adder
 
-        # Optionally, if a DDP column is provided for verification (not required), read it;
-        # otherwise, just use computed_ddp.
+        # (Optional) If a DDP column is provided for verification purposes, read it;
+        # otherwise, fall back to the computed value.
         try:
             provided_ddp_val = row.get("DDP")
             provided_ddp = float(provided_ddp_val) if provided_ddp_val not in [None, ""] and not pd.isna(provided_ddp_val) else computed_ddp
@@ -138,15 +142,15 @@ def df_to_dict_price(df):
             provided_ddp = computed_ddp
 
         d[(supplier, bid)] = {
-            "base_price": base_price,                   # Base Price value.
-            "Supplier Freight": supp_freight,             # Transportation add-on (for DDP).
-            "KBX": kbx,                                 # GP Pickup add-on.
-            "DDP": provided_ddp,                        # Provided DDP (for verification) or computed.
-            "computed_ddp": computed_ddp,               # Price + Supplier Freight.
-            "computed_gp": computed_gp,                 # Price + KBX.
-            "freight": chosen_adder,                    # The chosen add-on.
-            "freight_method": method,                   # "DDP" or "GP Pickup".
-            "effective_price": effective_price          # Price + chosen add-on.
+            "base_price": base_price,                   # Base price from "Price"
+            "Supplier Freight": supp_freight,             # Provided supplier freight add-on
+            "KBX": kbx,                                 # Provided KBX add-on
+            "DDP": provided_ddp,                        # Provided DDP for verification (if available)
+            "computed_ddp": computed_ddp,               # Price + Supplier Freight
+            "computed_gp": computed_gp,                 # Price + KBX
+            "freight": chosen_adder,                    # The chosen add-on (nonzero if available)
+            "freight_method": method,                   # "DDP", "GP Pickup", or "None"
+            "effective_price": effective_price          # base_price + chosen adder
         }
     return d
 
