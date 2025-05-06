@@ -2356,20 +2356,7 @@ def main():
             doc_text = f.read()
 
 
-        # Step 2: Identify a consistent pattern in your markdown headings.
-        # For example, if each report section starts with "##" followed by the report name,
-        # we can split on that pattern or use a more robust parsing approach.
-        #
-        # In this example, let's assume your markdown is structured with distinct 
-        # second-level headings (##) for each report type, like:
-        #
-        # ## "As-Is" Report
-        # (content...)
-        #
-        # ## "As-Is + Exclusions" Report
-        # (content...)
-        #
-        # and so forth.
+
         
         # Split the text by '## ' to separate each section
         sections = doc_text.split('## ')
