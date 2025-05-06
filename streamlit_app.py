@@ -19,7 +19,6 @@ from pptx import Presentation
 from modules.optimization import *
 import logging
 import uuid 
-from modules.ppt_scenario import *
 
 #Push message
 # testxd
@@ -292,6 +291,7 @@ def main():
             else:
                 st.info("No projects found. Start by creating a new project.")
 
+    # --- Optimization Section in app.py ---
     elif section == 'optimization':
         st.title("Scenario Builder & Optimization")
 
@@ -301,15 +301,15 @@ def main():
         if "scenario_definitions" not in st.session_state:
             st.session_state["scenario_definitions"] = {}
 
-            # Best of Best scenario with no rules
+            # Add a “Best of Best” scenario with no rules
             st.session_state["scenario_definitions"]["Best of Best"] = []
 
-            # As-is scenario => 100% volume must go to Incumbent
+            # Add an “As-is” scenario with a single rule: exactly 100% volume, grouping=All
             st.session_state["scenario_definitions"]["As-is"] = [
                 {
                     "rule_type": "% of Volume Awarded",
                     "operator": "Exactly",
-                    "rule_input": "100",   # Interpreted as 100%
+                    "rule_input": "100",
                     "grouping": "All",
                     "grouping_scope": "All",
                     "supplier_scope": "Incumbent"
@@ -333,10 +333,10 @@ def main():
             with st.expander("Custom Rules (Current Rule Set)", expanded=True):
                 st.markdown("#### Build & Manage Your Current Rule Set")
 
-                # Left side: rule-building UI; Middle: scenario name; Right: "Save Scenario"
+                # Columns for (left) rule-building, (middle) scenario name, (right) save scenario
                 col1, col2, col3 = st.columns([2, 1, 1])
 
-                # -- (A) The rule-building UI in col1 --
+                # -- (A) The original rule-building UI in col1 --
                 with col1:
                     rule_descriptions = {
                         "% of Volume Awarded": "Operator + % ensures the specified supplier scope receives that portion of volume.",
@@ -352,13 +352,14 @@ def main():
                     rule_type = st.selectbox(
                         "Rule Type", 
                         options=[
-                            "% of Volume Awarded", "# of Volume Awarded", "# of Transitions",
-                            "# of Suppliers", "Supplier Exclusion", "Exclude Bids"
+                            "% of Volume Awarded", "# of Volume Awarded", "# of Transitions", "# of Suppliers", 
+                            "Supplier Exclusion", "Exclude Bids"
                         ],
                         key="rule_type_select"
                     )
                     st.markdown(f"<small>*{rule_descriptions.get(rule_type, '')}*</small>", unsafe_allow_html=True)
 
+                    # Operator & Input
                     col_op, col_in = st.columns(2)
                     with col_op:
                         if rule_type == "Supplier Exclusion":
@@ -396,7 +397,7 @@ def main():
                         elif rule_type != "Exclude Bids":
                             rule_input = st.text_input("Rule Input")
 
-                    # If "Exclude Bids," do numeric/text logic
+                    # If "Exclude Bids," special numeric/text logic
                     bid_grouping = None
                     bid_exclusion_value = None
                     if rule_type == "Exclude Bids":
@@ -465,7 +466,7 @@ def main():
                         else:
                             grouping_scope_sel = "All"
 
-                    # Supplier scope
+                    # Supplier scope logic
                     if rule_type in ["# of Transitions", "# of Suppliers"]:
                         supplier_scope = "All"
                         st.selectbox("Supplier Scope", ["All"], disabled=True)
@@ -499,7 +500,6 @@ def main():
                     with rcol_add:
                         if st.button("Add Rule"):
                             errors = []
-                            # Validation
                             if rule_type in ["% of Volume Awarded", "% Minimum volume awarded"]:
                                 try:
                                     p_test = float(rule_input.rstrip("%"))
@@ -507,13 +507,11 @@ def main():
                                         errors.append("Percentage must be between 0 and 100.")
                                 except:
                                     errors.append("Invalid percentage format (e.g. '50.00%').")
-
                             elif rule_type in ["# of Volume Awarded", "# of transitions", "# Minimum volume awarded"]:
                                 try:
                                     float(rule_input)
                                 except:
                                     errors.append("Please enter a valid numeric value for the rule input.")
-
                             if rule_type == "Exclude Bids":
                                 sbad = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
                                 if not is_bid_attribute_numeric(bid_grouping, sbad):
@@ -588,32 +586,16 @@ def main():
                         st.stop()
 
                     try:
-                        # =========== UPDATED df_to_dict_baseline_price ==============
-                        # Now store both baseline + current in a dictionary
-                        def df_to_dict_baseline_price(df):
-                            d = {}
-                            for _, row in df.iterrows():
-                                bid = normalize_bid_id(row["Bid ID"])
-                                baseline_val = row.get("Baseline Price", 0.0)
-                                current_val  = row.get("Current Price", 0.0)
-                                d[bid] = {
-                                    "baseline": baseline_val,
-                                    "current":  current_val
-                                }
-                            return d
-
-                        # =========== Load data ==============
                         item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
                         price_dict = df_to_dict_price(sheet_dfs["Price"])
                         demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
-                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])  # Updated
+                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
                         capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
                         rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
                         discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
                         supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
                         suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
 
-                        # =========== Updated run_optimization with Current Price logic ===========
                         with st.spinner("Running optimization..."):
                             out_file, feasibility_notes, model_status = run_optimization(
                                 capacity_dict,
@@ -622,7 +604,7 @@ def main():
                                 price_dict,
                                 rebate_tiers_dict,
                                 discount_tiers_dict,
-                                baseline_price_dict,  # Now includes baseline + current
+                                baseline_price_dict,
                                 rules=st.session_state["rules_list"],
                                 supplier_bid_attr_dict=supplier_bid_attr_dict,
                                 suppliers=suppliers
@@ -635,8 +617,6 @@ def main():
                         st.text(feasibility_notes)
                         st.markdown("#### Optimization Results")
                         try:
-                            # We assume run_optimization now produces columns:
-                            #   Bid ID, Bid ID Split, Facility, Incumbent, Baseline Price, Current Price, ...
                             df_results = pd.read_excel(out_file, sheet_name="Results")
                             st.dataframe(df_results)
                             with open(out_file, "rb") as f:
@@ -645,29 +625,6 @@ def main():
                             st.warning("Unable to read 'Results' sheet. Possibly no solution was found.")
                     except Exception as e:
                         st.error(f"Error preparing data for optimization: {e}")
-
-            ################################################################
-            # SCENARIO SUMMARY GROUPING (for PPT details) [Optional]
-            ################################################################
-            st.markdown("### Scenario Summary (PowerPoint) Configuration (Optional)")
-            if st.session_state.merged_data is not None:
-                grouping_options = st.session_state.merged_data.columns.tolist()
-                st.selectbox("Group by for Scenario Detail (PPT)", grouping_options, key="scenario_detail_grouping")
-
-                # (Optional) sub-summaries
-                st.toggle("Include Sub-Scenario Summaries?", key="scenario_sub_summaries_on")
-                if st.session_state["scenario_sub_summaries_on"]:
-                    scenario_summary_fields = st.session_state.merged_data.columns.tolist()
-                    st.selectbox("Scenario Summaries Selections", scenario_summary_fields, key="scenario_summary_selections")
-                    sub_vals = st.session_state.merged_data[st.session_state.scenario_summary_selections].unique()
-                    st.pills(
-                        "Select scenario sub-summaries",
-                        sub_vals,
-                        selection_mode="multi",
-                        key="sub_summary_selections"
-                    )
-            else:
-                st.info("No merged_data available; cannot configure scenario detail grouping yet.")
 
             ################################################################
             # 3) SAVED SCENARIOS EXPANDER (with “Run All Scenarios”)
@@ -687,13 +644,7 @@ def main():
                                 del st.session_state["scenario_definitions"][scen_name]
                                 st.rerun()
 
-                st.markdown("#### Select Output Format")
-                output_format = st.radio(
-                    "Choose output format(s)",
-                    options=["Excel only", "PowerPoint only", "Both"],
-                    index=0
-                )
-
+                st.markdown("#### Run All Saved Scenarios")
                 if st.button("Run All Scenarios"):
                     if not st.session_state["scenario_definitions"]:
                         st.error("No scenarios have been saved.")
@@ -708,24 +659,12 @@ def main():
                         st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Cannot run optimization.")
                         st.stop()
 
-                    # =========== UPDATED df_to_dict_baseline_price for multi-scenario =============
-                    def df_to_dict_baseline_price(df):
-                        d = {}
-                        for _, row in df.iterrows():
-                            bid = normalize_bid_id(row["Bid ID"])
-                            baseline_val = row.get("Baseline Price", 0.0)
-                            current_val  = row.get("Current Price", 0.0)
-                            d[bid] = {
-                                "baseline": baseline_val,
-                                "current":  current_val
-                            }
-                        return d
-
+                    # Prepare data
                     try:
                         item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
                         price_dict = df_to_dict_price(sheet_dfs["Price"])
                         demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
-                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])  # new function
+                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
                         capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
                         rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
                         discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
@@ -758,94 +697,45 @@ def main():
                                 if status == "Infeasible":
                                     infeasible_scenarios.append(scenario_nm)
 
+                                # Attempt to read “Results” sheet; if fails or infeasible, produce empty DF
                                 try:
                                     df_res = pd.read_excel(out_file, sheet_name="Results")
-                                except:
+                                except Exception:
                                     df_res = pd.DataFrame()
 
                                 scenario_results_dict[scenario_nm] = df_res
                             except Exception as e:
                                 st.warning(f"Scenario '{scenario_nm}' failed: {e}")
+                                # Insert an empty DF for this scenario
                                 scenario_results_dict[scenario_nm] = pd.DataFrame()
 
-                    excel_output = BytesIO()
-                    ppt_output = BytesIO()
-                    scenario_ppt_data = None
+                    # Now compile them into a single Excel
+                    if scenario_results_dict:
+                        combined_buf = BytesIO()
+                        with pd.ExcelWriter(combined_buf, engine="openpyxl") as writer:
+                            for s_name, df_scen in scenario_results_dict.items():
+                                safe_sname = s_name[:31]
+                                df_scen.to_excel(writer, sheet_name=safe_sname, index=False)
+                        combined_buf.seek(0)
 
-                    # (A) Excel
-                    if output_format in ["Excel only", "Both"]:
-                        if scenario_results_dict:
-                            with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
-                                for s_name, df_scen in scenario_results_dict.items():
-                                    # Reorder columns if present
-                                    if not df_scen.empty:
-                                        # Desired order
-                                        desired_cols = [
-                                            "Bid ID", "Bid ID Split", "Facility", "Incumbent",
-                                            "Baseline Price", "Current Price", "Baseline Spend",
-                                            "Awarded Supplier", "Original Awarded Supplier Price",
-                                            "Percentage Volume Discount", "Discounted Awarded Supplier Price",
-                                            "Awarded Supplier Spend", "Awarded Volume",
-                                            "Baseline Savings", "Current Price Savings",
-                                            "Rebate %", "Rebate Savings"
-                                        ]
-                                        existing_cols = [c for c in desired_cols if c in df_scen.columns]
-                                        df_scen = df_scen.reindex(columns=existing_cols)
-
-                                    safe_sname = s_name[:31]
-                                    df_scen.to_excel(writer, sheet_name=safe_sname, index=False)
-                            excel_output.seek(0)
-
-                            st.download_button(
-                                label="Download All Scenario Results (Excel)",
-                                data=excel_output.getvalue(),
-                                file_name="all_scenarios_results.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                            st.success("All scenario results compiled into an Excel file.")
-                        else:
-                            st.error("No scenario produced valid results. Excel was not generated.")
-
-                    # (B) PowerPoint
-                    if output_format in ["PowerPoint only", "Both"]:
-                        # Build scenario_dataframes for PPT
-                        scenario_dataframes = {}
-                        for scen_name, df_res in scenario_results_dict.items():
-                            scenario_dataframes[f"#{scen_name}"] = df_res.copy()
-
-                        # Possibly rename columns
-                        for key, dfp in scenario_dataframes.items():
-                            if "Baseline Savings" not in dfp.columns and "Savings" in dfp.columns:
-                                dfp["Baseline Savings"] = dfp["Savings"]
-                            if "Supplier Name" in dfp.columns and "Awarded Supplier" not in dfp.columns:
-                                dfp["Awarded Supplier"] = dfp["Supplier Name"]
-
-                        script_dir = os.path.dirname(os.path.abspath(__file__))
-                        template_file_path = os.path.join(script_dir, 'Slide template.pptx')
-
-                        prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path=template_file_path)
-                        if prs is not None:
-                            prs.save(ppt_output)
-                            scenario_ppt_data = ppt_output.getvalue()
-                            st.success("All scenario results compiled into a PowerPoint file.")
-
-                            st.download_button(
-                                label="Download Scenario Summary (PowerPoint)",
-                                data=scenario_ppt_data,
-                                file_name="scenario_summary.pptx",
-                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                            )
-                        else:
-                            st.error("Failed to generate PowerPoint summary.")
-
-                    if infeasible_scenarios:
-                        st.warning(
-                            "Some scenarios were infeasible: "
-                            + ", ".join(infeasible_scenarios)
-                            + ". Their sheets/slides may be empty or partial."
+                        st.download_button(
+                            label="Download All Scenario Results",
+                            data=combined_buf.getvalue(),
+                            file_name="all_scenarios_results.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
+                        st.success("All scenario results have been combined into one Excel file.")
 
-            # Final check for any leftover required sheets
+                        if infeasible_scenarios:
+                            st.warning(
+                                "Some scenarios were infeasible: "
+                                + ", ".join(infeasible_scenarios)
+                                + ". Their sheets will be empty or partial."
+                            )
+                    else:
+                        st.error("No scenario produced valid results.")
+
+            # Final check that required sheets exist for anything else
             required_sheet_names = [
                 "Item Attributes", "Price", "Demand", "Rebate Tiers", 
                 "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
@@ -857,8 +747,6 @@ def main():
                     "Please upload an Excel file that contains all of these sheets."
                 )
                 st.stop()
-
-
 
 
 
