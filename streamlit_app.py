@@ -21,30 +21,6 @@ import logging
 import uuid 
 from modules.ppt_scenario import *
 
-#Push message
-# testxd
-# # Configure logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
-# # Initialize Supabase client
-# @st.cache_resource
-# def init_supabase_client():
-#     url = st.secrets["SUPABASE_URL"]
-#     key = st.secrets["SUPABASE_KEY"]
-#     return create_client(url, key)
-
-# supabase: Client = init_supabase_client()
-
-# # Define Storage Bucket and Database Table from secrets
-# STORAGE_BUCKET = st.secrets["SUPABASE_STORAGE_BUCKET"]
-# DB_TABLE = st.secrets.get("SUPABASE_DB_TABLE", "uploaded_files")  # Defaults to 'uploaded_files' if not set
-
-# # Debug: Display storage bucket and table
-# st.write(f"Storage Bucket: {STORAGE_BUCKET}")
-# st.write(f"Database Table: {DB_TABLE}")
-# st.write(f"Supabase Client Initialized: {supabase is not None}")
-
 
 
 def apply_custom_css():
@@ -561,7 +537,6 @@ def main():
                         else:
                             st.session_state["scenario_definitions"][scenario_name] = list(st.session_state["rules_list"])
                             st.success(f"Scenario '{scenario_name}' saved with {len(st.session_state['rules_list'])} rules.")
-
                 # Show the current unsaved rules
                 temp_item_attr = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
                 if st.session_state.get("rules_list"):
@@ -857,7 +832,6 @@ def main():
                     "Please upload an Excel file that contains all of these sheets."
                 )
                 st.stop()
-
 
 
 
