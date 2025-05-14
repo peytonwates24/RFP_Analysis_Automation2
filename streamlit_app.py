@@ -303,6 +303,12 @@ def main():
                 if missing:
                     st.error(f"Missing required columns in '{sheet_name}': {', '.join(missing)}")
 
+            # ---------- Detect whether freight columns exist ----------
+            price_cols       = sheet_dfs["Price"].columns.str.strip().tolist()
+            freight_enabled  = all(c in price_cols for c in ["Supplier Freight", "KBX"])
+            st.info(f"Freight logic **{'ENABLED' if freight_enabled else 'DISABLED'}** "
+                    f"(detected in Price sheet)")
+
             ################################################################
             # 2) CUSTOM RULES EXPANDER (with Save & Single-run)
             ################################################################
@@ -597,10 +603,11 @@ def main():
                                 price_dict,
                                 rebate_tiers_dict,
                                 discount_tiers_dict,
-                                baseline_price_dict,  # Now includes baseline + current
-                                rules=st.session_state["rules_list"],
+                                baseline_price_dict,            # includes baseline + current
+                                rules=st.session_state.get("rules_list", []),
                                 supplier_bid_attr_dict=supplier_bid_attr_dict,
-                                suppliers=suppliers
+                                suppliers=suppliers,
+                                freight_enabled=freight_enabled 
                             )
 
                         st.success(f"Model Status: {model_status}")
@@ -717,17 +724,18 @@ def main():
                     with st.spinner("Running all scenarios..."):
                         for scenario_nm, the_rules in st.session_state["scenario_definitions"].items():
                             try:
-                                out_file, feas_notes, status = run_optimization(
-                                    capacity_data=capacity_dict,
-                                    demand_data=demand_dict,
-                                    item_attr_data=item_attr_dict,
-                                    price_data=price_dict,
-                                    rebate_tiers=rebate_tiers_dict,
-                                    discount_tiers=discount_tiers_dict,
-                                    baseline_price_data=baseline_price_dict,
-                                    rules=the_rules,
-                                    supplier_bid_attr_dict=supplier_bid_attr_dict,
-                                    suppliers=suppliers
+                                out_file, feas, status = run_optimization(
+                                    capacity_data       = capacity_dict,
+                                    demand_data         = demand_dict,
+                                    item_attr_data      = item_attr_dict,
+                                    price_data          = price_dict,
+                                    rebate_tiers        = rebate_tiers_dict,
+                                    discount_tiers      = discount_tiers_dict,
+                                    baseline_price_data = baseline_price_dict,
+                                    rules               = the_rules,
+                                    supplier_bid_attr_dict = supplier_bid_attr_dict,
+                                    suppliers           = suppliers,
+                                    freight_enabled     = freight_enabled   # ← NEW ARG
                                 )
 
                                 if status == "Infeasible":
@@ -747,47 +755,60 @@ def main():
                     ppt_output = BytesIO()
                     scenario_ppt_data = None
 
-                    # (A) Excel  ───────────────────────────────────────────────────────
+                    # ───────────── Compile Excel (freight-aware ordering) ─────────────
                     if output_format in ["Excel only", "Both"]:
-                        if scenario_results_dict:
-                            with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
-                                for s_name, df_scen in scenario_results_dict.items():
+                        excel_output = BytesIO()
+                        with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
+                            for s_name, df_scen in scenario_results_dict.items():
 
-                                    # Re-order columns (keep freight fields) – UPDATED
-                                    if not df_scen.empty:
-                                        desired_cols = [
-                                            "Bid ID", "Bid ID Split", "Facility", "Incumbent",
-                                            "Baseline Price", "Current Price", "Baseline Spend",
-                                            "Awarded Supplier", "Original Awarded Supplier Price",
-                                            "Percentage Volume Discount", "Discounted Awarded Supplier Price",
-                                            # ── new freight-aware columns ──
-                                            "Freight Method", "Freight Amount", "Effective Supplier Price",
-                                            # ───────────────────────────────
-                                            "Awarded Supplier Spend", "Awarded Volume",
-                                            "Baseline Savings", "Current Price Savings",
-                                            "Rebate %", "Rebate Savings"
-                                        ]
+                                # always write a sheet so the workbook keeps its order
+                                if df_scen.empty:
+                                    df_scen.to_excel(
+                                        writer,
+                                        sheet_name=(s_name[:31] or "Sheet1"),
+                                        index=False
+                                    )
+                                    continue
 
-                                        # first keep the desired cols that exist,
-                                        # then append any extras that may be present
-                                        ordered_cols  = [c for c in desired_cols if c in df_scen.columns]
-                                        ordered_cols += [c for c in df_scen.columns if c not in ordered_cols]
-                                        df_scen = df_scen[ordered_cols]
+                                # ---------- column ordering ----------
+                                base_cols = [
+                                    "Bid ID", "Bid ID Split", "Facility", "Incumbent",
+                                    "Baseline Price", "Current Price", "Baseline Spend",
+                                    "Awarded Supplier", "Original Awarded Supplier Price",
+                                    "Percentage Volume Discount", "Discounted Awarded Supplier Price"
+                                ]
+                                freight_cols = ["Freight Method", "Freight Amount", "Effective Supplier Price"]
+                                tail_cols = [
+                                    "Awarded Supplier Spend", "Awarded Volume",
+                                    "Baseline Savings", "Current Price Savings",
+                                    "Rebate %", "Rebate Savings"
+                                ]
 
-                                    safe_sname = s_name[:31] or "Sheet1"
-                                    df_scen.to_excel(writer, sheet_name=safe_sname, index=False)
+                                desired_cols = (
+                                    base_cols +
+                                    (freight_cols if freight_enabled else []) +   # ← NEW: include only when freight is ON
+                                    tail_cols
+                                )
+                                ordered = [c for c in desired_cols if c in df_scen.columns]
+                                ordered += [c for c in df_scen.columns if c not in ordered]
 
-                            excel_output.seek(0)
+                                df_scen = df_scen[ordered]
+                                df_scen.to_excel(
+                                    writer,
+                                    sheet_name=(s_name[:31] or "Sheet1"),
+                                    index=False
+                                )
 
-                            st.download_button(
-                                label="Download All Scenario Results (Excel)",
-                                data=excel_output.getvalue(),
-                                file_name="all_scenarios_results.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                            st.success("All scenario results compiled into an Excel file.")
-                        else:
-                            st.error("No scenario produced valid results. Excel was not generated.")
+                        excel_output.seek(0)
+                        st.download_button(
+                            "Download All Scenario Results (Excel)",
+                            data=excel_output.getvalue(),
+                            file_name="all_scenarios_results.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                        st.success("All scenario results compiled into an Excel file.")
+                    else:
+                        st.error("No scenario produced valid results. Excel was not generated.")
 
 
                     # (B) PowerPoint

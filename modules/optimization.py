@@ -1,10 +1,5 @@
 ###############################################################################
-# optimization.py – FULL freight-aware model (≈930 lines)
-#  * Merges your original 931-line “multi-scenario/current-price” engine
-#    with the freight/KBX logic from the alternate build.
-#  * Nothing trimmed or condensed: every helper, every rule branch, every
-#    debug section remains verbatim – only freight code & column additions
-#    are grafted in.
+# optimization.py 
 ###############################################################################
 import os
 import logging
@@ -31,11 +26,15 @@ M   = 1e9   # Big-M
 EPS = 0.0   # Non-zero lower-bound for “positive award” binary triggers
 
 # ──────────────────────────────────────────────────────────────────────────────
-# REQUIRED COLUMNS – Price sheet now includes Supplier Freight & KBX
+# OPTIONAL FREIGHT COLUMNS
+# If they’re present we’ll model freight; if not we’ll ignore it altogether
 # ──────────────────────────────────────────────────────────────────────────────
+FREIGHT_COLS = ["Supplier Freight", "KBX"]
+
 REQUIRED_COLUMNS = {
     "Item Attributes"        : ["Bid ID", "Incumbent"],
-    "Price"                  : ["Supplier Name", "Bid ID", "Price", "Supplier Freight", "KBX"],
+    # NOTE:  freight columns **removed** from the “required” list
+    "Price"                  : ["Supplier Name", "Bid ID", "Price"],
     "Demand"                 : ["Bid ID", "Demand"],
     "Baseline Price"         : ["Bid ID", "Baseline Price", "Current Price"],
     "Capacity"               : ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
@@ -43,6 +42,7 @@ REQUIRED_COLUMNS = {
     "Discount Tiers"         : ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
     "Supplier Bid Attributes": ["Supplier Name", "Bid ID"]
 }
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Excel-helper utilities  (100% identical to your long original, plus freight)
@@ -202,9 +202,12 @@ def is_bid_attribute_numeric(bid_group, sbad):
 # ──────────────────────────────────────────────────────────────────────────────
 # Main optimization engine (identical logic, freight + current price combos)
 # ──────────────────────────────────────────────────────────────────────────────
-def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
-                     rebate_tiers, discount_tiers, baseline_price_data, rules=[],
-                     supplier_bid_attr_dict=None, suppliers=None):
+def run_optimization(
+        capacity_data, demand_data, item_attr_data, price_data,
+        rebate_tiers, discount_tiers, baseline_price_data, rules=[],
+        supplier_bid_attr_dict=None, suppliers=None,
+        freight_enabled=True        # <<< NEW FLAG
+):
 
     if supplier_bid_attr_dict is None:
         raise ValueError("supplier_bid_attr_dict required")
@@ -233,54 +236,101 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
 
     items_dynamic = list(demand_data.keys())
 
+        # ──────────────────────────────────────────────────────────────
+    # EXPAND  “Apply to all items individually”
+    #   • When a rule’s grouping_scope is that convenience token,
+    #     clone the rule once for every unique value of the chosen
+    #     grouping field so that the solver sees explicit, concrete
+    #     constraints (Bid-ID-by-Bid-ID, Facility-by-Facility, …).
+    # ──────────────────────────────────────────────────────────────
+    def _expand_individual_rules(rules_in, items_dyn, item_attrs):
+        """
+        Returns a *new* rule list where every convenience rule has been
+        expanded; original list is left untouched.
+        """
+        expanded = []
+        for rule in rules_in:
+            gscope = str(rule.get("grouping_scope", "")).strip().lower()
+            if gscope != "apply to all items individually":
+                expanded.append(rule)
+                continue
+
+            grouping_field = rule.get("grouping", "").strip()
+            if not grouping_field:          # defensive safeguard
+                expanded.append(rule)
+                continue
+
+            # ---------- build unique value list ----------
+            if grouping_field.lower() == "bid id":
+                unique_vals = sorted(items_dyn)
+            elif grouping_field.lower() == "all":
+                # token makes no sense with Grouping = All – keep as-is
+                expanded.append(rule)
+                continue
+            else:
+                unique_vals = sorted({
+                    str(item_attrs[j].get(grouping_field, "")).strip()
+                    for j in items_dyn
+                    if str(item_attrs[j].get(grouping_field, "")).strip() != ""
+                })
+
+            # ---------- emit one copy per unique value ----------
+            for val in unique_vals:
+                nr                   = rule.copy()
+                nr["grouping_scope"] = str(val)
+                expanded.append(nr)
+
+        return expanded
+
+    # Replace incoming rule list with the expanded one
+    rules = _expand_individual_rules(rules, items_dynamic, item_attr_data)
+
     # ───────────────────── model shell first ────────────────────
     prob = pulp.LpProblem("Sourcing_with_Freight", pulp.LpMinimize)
 
-    # ─────────────────── FREIGHT DECISION VARIABLES ────────────────────
-    # BEGIN PATCH  ─ choose exactly one logistics mode (DDP vs KBX) per
-    #               supplier × bid while always keeping the award feasible
-    # ------------------------------------------------------------------
-    #
-    # b_mode = 1  →  DDP / supplier-freight active
-    # b_mode = 0  →  GP-pickup (KBX) active
+    # =======================================================================
+    # FREIGHT-AWARE VOLUMES
+    #   • When freight_enabled == True  ➜ dual-mode (DDP vs KBX) volumes
+    #   • When freight_enabled == False ➜ single volume var, no freight math
+    # =======================================================================
 
-    b_mode = {(s, j): pulp.LpVariable(f"bDDP_{s}_{j}", cat='Binary')
-              for s in suppliers for j in items_dynamic}
-
-    # continuous volumes for each freight option (created un-conditionally)
-    x_sf  = {(s, j): pulp.LpVariable(f"xSF_{s}_{j}",  lowBound=0)   # DDP
-             for s in suppliers for j in items_dynamic}
-
-    x_kbx = {(s, j): pulp.LpVariable(f"xKBX_{s}_{j}", lowBound=0)   # KBX
-             for s in suppliers for j in items_dynamic}
-
-    # activate only the selected mode
-    for s, j in x_sf:
-        prob += x_sf [(s, j)] <= M *  b_mode[(s, j)],      f"DDP_ON_{s}_{j}"
-        prob += x_kbx[(s, j)] <= M * (1 - b_mode[(s, j)]), f"KBX_ON_{s}_{j}"
-
-
-    # Aggregate volume variable used everywhere else
-    x = {(s, j): pulp.LpVariable(f"x_{s}_{j}",        lowBound=0)
+    # (A) master volume variable that all other math will reference
+    x = {(s, j): pulp.LpVariable(f"x_{s}_{j}", lowBound=0)
          for s in suppliers for j in items_dynamic}
 
-    # Link:  x = x_sf + x_kbx
-    for s in suppliers:
-        for j in items_dynamic:
-            expr = 0
-            if (s, j) in x_sf:
-                expr += x_sf[(s, j)]
-            if (s, j) in x_kbx:
-                expr += x_kbx[(s, j)]
-            prob += x[(s, j)] == expr, f"LinkVol_{s}_{j}"
+    if freight_enabled:
+        # ---------- mode selector ----------
+        #  b_mode = 1 → DDP   (Supplier Freight)
+        #  b_mode = 0 → KBX   (GP Pickup)
+        b_mode = {(s, j): pulp.LpVariable(f"bDDP_{s}_{j}", cat="Binary")
+                  for s in suppliers for j in items_dynamic}
 
-    # ─────────────────── transition helper bins ─────────────────
+        # split volumes
+        x_sf  = {(s, j): pulp.LpVariable(f"xSF_{s}_{j}",  lowBound=0)  # DDP
+                 for s in suppliers for j in items_dynamic}
+        x_kbx = {(s, j): pulp.LpVariable(f"xKBX_{s}_{j}", lowBound=0)  # KBX
+                 for s in suppliers for j in items_dynamic}
+
+        # activate only the chosen mode
+        for s, j in x_sf:
+            prob += x_sf [(s, j)] <= M *  b_mode[(s, j)],      f"DDP_ON_{s}_{j}"
+            prob += x_kbx[(s, j)] <= M * (1 - b_mode[(s, j)]), f"KBX_ON_{s}_{j}"
+
+        # tie-back so downstream constraints always use x
+        for s in suppliers:
+            for j in items_dynamic:
+                prob += x[(s, j)] == x_sf[(s, j)] + x_kbx[(s, j)], f"LinkVol_{s}_{j}"
+    else:
+        # Freight disabled → placeholders so .get() calls don't error
+        b_mode, x_sf, x_kbx = {}, {}, {}
+
+    # ────────────────── transition helper binaries ─────────────────
     T = {}
     for j in items_dynamic:
         inc = item_attr_data[j].get("Incumbent")
         for s in suppliers:
             if s != inc:
-                T[(j, s)] = pulp.LpVariable(f"T_{j}_{s}", cat='Binary')
+                T[(j, s)] = pulp.LpVariable(f"T_{j}_{s}", cat="Binary")
 
     # ───────────────────── other decision vars ──────────────────
     S0         = {s: pulp.LpVariable(f"S0_{s}",  lowBound=0) for s in suppliers}
@@ -327,37 +377,38 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
 
     # ────────────────── spend / freight expressions ─────────────
     for s in suppliers:
-        expr_disc    = 0.0
-        expr_freight = 0.0
+        expr_disc    = 0.0   # discounted spend (price + any supplier freight on DDP)
+        expr_freight = 0.0   # KBX freight component
 
         for j in items_dynamic:
             if (s, j) not in price_data:
                 continue
             p = price_data[(s, j)]
 
-            # DDP volume
-            expr_disc += (p["base_price"] + p["supplier_freight"]) * x_sf[(s, j)]
-            # KBX volume
-            expr_disc    += p["base_price"] * x_kbx[(s, j)]
-            expr_freight += p["kbx_freight"] * x_kbx[(s, j)]
+            if freight_enabled:
+                # DDP
+                expr_disc += (p["base_price"] + p["supplier_freight"]) * x_sf.get((s, j), 0)
+                # KBX
+                expr_disc    += p["base_price"] * x_kbx.get((s, j), 0)
+                expr_freight += p["kbx_freight"] * x_kbx.get((s, j), 0)
+            else:
+                expr_disc += p["base_price"] * x[(s, j)]
+                # no freight component
 
         prob += S0[s] == expr_disc,    f"S0_{s}"
         prob += F [s] == expr_freight, f"F_{s}"
 
-
+    # when freight disabled lock F to zero (safety)
+    if not freight_enabled:
+        for s in suppliers:
+            prob += F[s] == 0, f"FreightOff_{s}"
 
     # ──────────────────────────────────────────────────────────────
-    # Upper-bound spend per supplier (used as Big-M in tier constraints)
+    # Upper-bound spend per supplier (Big-M for tier constraints)
     # ──────────────────────────────────────────────────────────────
     max_price_val = max((v["base_price"] for v in price_data.values()), default=0)
-
-    # crude but safe: supplier’s total capacity × max observed unit price
     U_spend = {
-        s: sum(
-            cap
-            for ((ss, _cap_scope, _cap_val), cap) in capacity_data.items()
-            if ss == s
-        ) * max_price_val
+        s: sum(cap for ((ss, _, _), cap) in capacity_data.items() if ss == s) * max_price_val
         for s in suppliers
     }
 
@@ -371,9 +422,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             z_discount[s] = {k: pulp.LpVariable(f"zd_{s}_{k}", cat="Binary")
                              for k in range(len(tiers))}
             feasible = []
-
-            for k, (Dmin, Dmax, Dperc, scope_attr, scope_val) in enumerate(tiers):
-                # total *possible* volume that could count toward this tier
+            for k, (Dmin, Dmax, _Dperc, scope_attr, scope_val) in enumerate(tiers):
                 if not scope_attr or str(scope_attr).strip().upper() == "ALL":
                     tot_possible = sum(demand_data[j] for j in items_dynamic)
                 else:
@@ -381,14 +430,11 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         demand_data[j] for j in items_dynamic
                         if str(item_attr_data[j].get(scope_attr, "")).strip() == str(scope_val).strip()
                     )
-
                 if float(Dmin) <= tot_possible:
                     feasible.append(k)
                 else:
-                    # tier can never be met ⇒ force its indicator to zero
                     prob += z_discount[s][k] == 0, f"DisableDisc_{s}_{k}"
 
-            # exactly one feasible tier active iff supplier is used
             if feasible:
                 prob += pulp.lpSum(z_discount[s][k] for k in feasible) == z[s], f"OneDisc_{s}"
             else:
@@ -406,8 +452,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             y_rebate[s] = {k: pulp.LpVariable(f"yr_{s}_{k}", cat="Binary")
                            for k in range(len(tiers))}
             feasible = []
-
-            for k, (Rmin, Rmax, Rperc, scope_attr, scope_val) in enumerate(tiers):
+            for k, (Rmin, Rmax, _Rperc, scope_attr, scope_val) in enumerate(tiers):
                 if not scope_attr or str(scope_attr).strip().upper() == "ALL":
                     tot_possible = sum(demand_data[j] for j in items_dynamic)
                 else:
@@ -415,7 +460,6 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                         demand_data[j] for j in items_dynamic
                         if str(item_attr_data[j].get(scope_attr, "")).strip() == str(scope_val).strip()
                     )
-
                 if float(Rmin) <= tot_possible:
                     feasible.append(k)
                 else:
@@ -428,9 +472,8 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         else:
             y_rebate[s] = {}
 
-
     # ──────────────────────────────────────────────────────────────
-    # Suppliers with **no** tiers – lock discount & rebate vars to zero
+    # Suppliers with no tiers – lock vars to zero
     # ──────────────────────────────────────────────────────────────
     for s in suppliers:
         if not discount_tiers.get(s, []):
@@ -439,20 +482,18 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             prob += rebate_var[s] == 0, f"Fixreb_{s}"
 
     # ──────────────────────────────────────────────────────────────
-    # Discount-tier constraints   (d[s] = % · S0[s] when tier active)
+    # Discount-tier constraints   (d[s] = % • S0[s])
     # ──────────────────────────────────────────────────────────────
     for s in suppliers:
         tiers = discount_tiers.get(s, [])
         Mdisc = U_spend[s] if U_spend[s] > 0 else M
         for k, (Dmin, Dmax, Dperc, scope_attr, scope_val) in enumerate(tiers):
 
-            # Volume that counts toward this supplier/tier
             if (not scope_attr) or str(scope_attr).strip().upper() == "ALL":
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
                 vol_expr = pulp.lpSum(
-                    x[(s, j)]
-                    for j in items_dynamic
+                    x[(s, j)] for j in items_dynamic
                     if str(item_attr_data[j].get(scope_attr, "")).strip() == str(scope_val).strip()
                 )
 
@@ -460,26 +501,23 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             if Dmax < float("inf"):
                 prob += vol_expr <= Dmax + M * (1 - z_discount[s][k]), f"DMax_{s}_{k}"
 
-            # d[s] equals Dperc × S0 when this tier is chosen
             prob += d[s] >= Dperc * S0[s] - Mdisc * (1 - z_discount[s][k]), f"dLow_{s}_{k}"
             prob += d[s] <= Dperc * S0[s] + Mdisc * (1 - z_discount[s][k]), f"dUp_{s}_{k}"
 
-        # ▶ Block ➊ – ensure d[s] is zero when no discount tier is active
+        # ensure d=0 when no tier picked
         if tiers:
-            sum_z_disc = pulp.lpSum(z_discount[s][k] for k in range(len(tiers)))
-            prob += d[s] <= Mdisc * sum_z_disc, f"dZeroWhenNoTier_{s}"
+            prob += d[s] <= Mdisc * pulp.lpSum(z_discount[s][k] for k in range(len(tiers))), f"dZero_{s}"
         else:
-            prob += d[s] == 0, f"dAlwaysZero_{s}"
+            prob += d[s] == 0, f"dZeroNoTier_{s}"
 
     # ──────────────────────────────────────────────────────────────
-    # Effective spend after **discount** (rebate base)  ← freight excluded
+    # Effective spend after discount (rebate base) – freight excluded
     # ──────────────────────────────────────────────────────────────
     for s in suppliers:
-        # old line:  S[s] == S0[s] - d[s] + F[s]
-        prob += S[s] == S0[s] - d[s], f"Spend_{s}"            ### 🔄 CHANGED
+        prob += S[s] == S0[s] - d[s], f"Spend_{s}"   # freight added later in obj
 
     # ──────────────────────────────────────────────────────────────
-    # Rebate-tier constraints   (rebate_var[s] = % · S[s] when tier active)
+    # Rebate-tier constraints   (rebate_var = % • S[s])
     # ──────────────────────────────────────────────────────────────
     for s in suppliers:
         tiers = rebate_tiers.get(s, [])
@@ -490,8 +528,7 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
                 vol_expr = pulp.lpSum(x[(s, j)] for j in items_dynamic)
             else:
                 vol_expr = pulp.lpSum(
-                    x[(s, j)]
-                    for j in items_dynamic
+                    x[(s, j)] for j in items_dynamic
                     if str(item_attr_data[j].get(scope_attr, "")).strip() == str(scope_val).strip()
                 )
 
@@ -502,13 +539,13 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             prob += rebate_var[s] >= Rperc * S[s] - Mreb * (1 - y_rebate[s][k]), f"rLow_{s}_{k}"
             prob += rebate_var[s] <= Rperc * S[s] + Mreb * (1 - y_rebate[s][k]), f"rUp_{s}_{k}"
 
-        # ▶ Block ➋ – ensure rebate_var[s] is zero when no rebate tier is active
+        # ensure rebate=0 when no tier picked
         if tiers:
-            sum_y_reb = pulp.lpSum(y_rebate[s][k] for k in range(len(tiers)))
-            prob += rebate_var[s] <= Mreb * sum_y_reb, f"rebZeroWhenNoTier_{s}"
+            prob += rebate_var[s] <= Mreb * pulp.lpSum(y_rebate[s][k] for k in range(len(tiers))), f"rZero_{s}"
         else:
-            prob += rebate_var[s] == 0, f"rebAlwaysZero_{s}"
+            prob += rebate_var[s] == 0, f"rZeroNoTier_{s}"
 
+    # ──────────────────────────────────────────────────────────────
 
     # ──────────────────────────────────────────────────────────────
     # Helpers for “lowest” & “second-lowest” supplier logic
@@ -539,29 +576,52 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
         # Supplier Exclusion.  (≈350 lines – kept verbatim.)
 
         # -------------------  # of Suppliers  -------------------
+        #
+        # The helper binary Y[s] must flip to 1 **only when a supplier is actually
+        # awarded positive volume** in the chosen grouping.  
+        # Using a tiny positive threshold (MIN_FLOW) instead of the global
+        # EPS = 0 guarantees that the solver cannot “fake-select” suppliers
+        # with zero volume just to satisfy the count constraint.
+        #
         if rule["rule_type"].lower() == "# of suppliers":
+            MIN_FLOW = 1e-6          # ← tiny > 0, local to this rule block
             try:
-                supplier_target=int(rule["rule_input"])
-            except: continue
-            operator=rule["operator"].strip().lower()
-            if rule["grouping"].strip().upper()=="ALL" or not rule["grouping_scope"].strip():
-                group_items=items_dynamic
-            elif rule["grouping"].strip().lower()=="bid id":
-                group_items=[normalize_bid_id(rule["grouping_scope"].strip())]
+                supplier_target = int(rule["rule_input"])
+            except Exception:
+                continue
+
+            operator = rule["operator"].strip().lower()
+
+            # ───── determine the list of Bid IDs included in the grouping ─────
+            if rule["grouping"].strip().upper() == "ALL" or not rule["grouping_scope"].strip():
+                group_items = items_dynamic
+            elif rule["grouping"].strip().lower() == "bid id":
+                group_items = [normalize_bid_id(rule["grouping_scope"].strip())]
             else:
-                gval=rule["grouping_scope"].strip()
-                group_items=[j for j in items_dynamic if str(item_attr_data[j].get(rule["grouping"],"")).strip()==gval]
-            Y={}
+                gval = rule["grouping_scope"].strip()
+                group_items = [
+                    j for j in items_dynamic
+                    if str(item_attr_data[j].get(rule["grouping"], "")).strip() == gval
+                ]
+
+            # ───── binary selector for each supplier ─────
+            Y = {}
             for s in suppliers:
-                Y[s]=pulp.LpVariable(f"Y_sup_{r_idx}_{s}",cat='Binary')
-                prob += pulp.lpSum(x[(s,j)] for j in group_items) >= EPS*Y[s], f"Ylb_{r_idx}_{s}"
-                prob += pulp.lpSum(x[(s,j)] for j in group_items) <= M  *Y[s], f"Yub_{r_idx}_{s}"
-            supplier_count=pulp.lpSum(Y[s] for s in suppliers)
-            if operator=="at least":
+                Y[s] = pulp.LpVariable(f"Y_sup_{r_idx}_{s}", cat='Binary')
+
+                # Y[s] = 1  ⇨  supplier must ship at least MIN_FLOW units
+                # Y[s] = 0  ⇨  supplier ships exactly 0 units
+                prob += pulp.lpSum(x[(s, j)] for j in group_items) >= MIN_FLOW * Y[s], f"Ylb_{r_idx}_{s}"
+                prob += pulp.lpSum(x[(s, j)] for j in group_items) <= M        * Y[s], f"Yub_{r_idx}_{s}"
+
+            # ───── supplier-count expression ─────
+            supplier_count = pulp.lpSum(Y[s] for s in suppliers)
+
+            if operator == "at least":
                 prob += supplier_count >= supplier_target, f"SupCntLB_{r_idx}"
-            elif operator=="at most":
+            elif operator == "at most":
                 prob += supplier_count <= supplier_target, f"SupCntUB_{r_idx}"
-            elif operator=="exactly":
+            elif operator == "exactly":
                 prob += supplier_count == supplier_target, f"SupCntEQ_{r_idx}"
             continue
 
@@ -906,28 +966,52 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
     )
 
     # ──────────────────────────────────────────────────────────────
-    # Prepare Results DataFrame
+    # Prepare Results DataFrame   (skip tiny phantom awards)
     # ──────────────────────────────────────────────────────────────
-    letter_list = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    excel_rows  = []
+    letter_list      = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    MIN_REPORT_VOL   = 1e-4          # ← volumes below this are treated as 0
+    excel_rows       = []
 
     for idx, j in enumerate(items_dynamic, start=1):
-        # suppliers that won > 0 volume on this Bid ID
-        awarded = [(s, pulp.value(x[(s, j)]) or 0) for s in suppliers
-                   if pulp.value(x[(s, j)]) > 0]
+
+        # suppliers that won > MIN_REPORT_VOL on this Bid ID
+        awarded = [
+            (s, vol)
+            for s in suppliers
+            if (vol := (pulp.value(x[(s, j)]) or 0.0)) > MIN_REPORT_VOL
+        ]
         if not awarded:
-            awarded = [("No Bid", 0)]
-        awarded.sort(key=lambda t: (-t[1], t[0]))
+            awarded = [("No Bid", 0.0)]
+        else:
+            awarded.sort(key=lambda t: (-t[1], t[0]))   # largest volume first
 
         bprice = baseline_price_data[j]["baseline"]
         cprice = baseline_price_data[j]["current"]
 
         for split_idx, (s, award_vol) in enumerate(awarded):
-            price_row = price_data[(s, j)]
+            if s == "No Bid":         # safeguard – no price data
+                excel_rows.append({
+                    "Bid ID": idx, "Bid ID Split": letter_list[split_idx],
+                    "Facility": item_attr_data[j].get("Facility", ""),
+                    "Incumbent": item_attr_data[j].get("Incumbent", ""),
+                    "Baseline Price": bprice, "Current Price": cprice,
+                    "Baseline Spend": bprice * award_vol,
+                    "Awarded Supplier": "No Bid",
+                    "Original Awarded Supplier Price": "",
+                    "Percentage Volume Discount": "",
+                    "Discounted Awarded Supplier Price": "",
+                    "Freight Method": "", "Freight Amount": "",
+                    "Effective Supplier Price": "",
+                    "Awarded Supplier Spend": "",
+                    "Awarded Volume": 0.0,
+                    "Baseline Savings": "", "Current Price Savings": "",
+                    "Rebate %": "", "Rebate Savings": ""
+                })
+                continue
 
-            # Which freight method actually fired?
-            use_sf  = (s, j) in x_sf  and pulp.value(x_sf[(s, j)])  > 0
-            use_kbx = (s, j) in x_kbx and pulp.value(x_kbx[(s, j)]) > 0
+            price_row   = price_data[(s, j)]
+            use_sf      = freight_enabled and (pulp.value(x_sf .get((s, j), 0.0)) > MIN_REPORT_VOL)
+            use_kbx     = freight_enabled and (pulp.value(x_kbx.get((s, j), 0.0)) > MIN_REPORT_VOL)
 
             if use_sf:
                 freight_method = "DDP"
@@ -935,44 +1019,41 @@ def run_optimization(capacity_data, demand_data, item_attr_data, price_data,
             elif use_kbx:
                 freight_method = "GP Pickup (KBX)"
                 freight_charge = price_row["kbx_freight"]
-            else:           # should not occur, but keep a safe default
-                freight_method = "None"
+            else:                       # freight disabled or not selected
+                freight_method = ""
                 freight_charge = 0.0
 
-            orig_price = price_row["base_price"]
+            orig_price      = price_row["base_price"]
 
-            # ---- active discount % (applies to (price+freight) for DDP,
-            #      and to price-only for KBX – we handled that upstream
-            #      by building S0 correctly) ---------------------------
+            # active discount %
             discount_pct = 0.0
             for k, tier in enumerate(discount_tiers.get(s, [])):
-                if pulp.value(z_discount[s][k]) and pulp.value(z_discount[s][k]) >= 0.5:
-                    discount_pct = tier[2]      # already a fraction (e.g., 0.03)
+                if pulp.value(z_discount[s][k]) > 0.5:
+                    discount_pct = tier[2]      # already a fraction
                     break
 
             discounted_price = orig_price * (1 - discount_pct)
             total_price      = discounted_price + freight_charge
             awarded_spend    = total_price * award_vol
 
-            # ---- rebate %  (applies to S = discounted spend basis) ----
+            # active rebate %
             rebate_pct = 0.0
             for k, tier in enumerate(rebate_tiers.get(s, [])):
-                if pulp.value(y_rebate[s][k]) and pulp.value(y_rebate[s][k]) >= 0.5:
+                if pulp.value(y_rebate[s][k]) > 0.5:
                     rebate_pct = tier[2]
                     break
 
-            # spend that actually earns the rebate:
-            #   • DDP  →  price + supplier-freight   (= total_price)
-            #   • KBX  →  price only                (= discounted_price)
-            spend_basis = total_price if use_sf else discounted_price
-            rebate_savings = spend_basis * award_vol * rebate_pct
+            spend_basis     = total_price if use_sf else discounted_price
+            rebate_savings  = spend_basis * award_vol * rebate_pct
 
-            baseline_spend = bprice * award_vol        
-            current_spend  = cprice * award_vol        
+            baseline_spend  = bprice * award_vol
+            current_spend   = cprice * award_vol
 
             excel_rows.append({
                 "Bid ID"                         : idx,
-                "Bid ID Split"                   : letter_list[split_idx] if split_idx < len(letter_list) else f"Split{split_idx+1}",
+                "Bid ID Split"                   : letter_list[split_idx] 
+                                                   if split_idx < len(letter_list) 
+                                                   else f"Split{split_idx+1}",
                 "Facility"                       : item_attr_data[j].get("Facility", ""),
                 "Incumbent"                      : item_attr_data[j].get("Incumbent", ""),
                 "Baseline Price"                 : bprice,
