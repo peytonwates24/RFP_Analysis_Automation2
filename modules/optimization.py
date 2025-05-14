@@ -32,16 +32,75 @@ EPS = 0.0   # Non-zero lower-bound for “positive award” binary triggers
 FREIGHT_COLS = ["Supplier Freight", "KBX"]
 
 REQUIRED_COLUMNS = {
-    "Item Attributes"        : ["Bid ID", "Incumbent"],
-    # NOTE:  freight columns **removed** from the “required” list
+    # NEW compact template
+    "Bid Data"         : ["Supplier Name", "Bid ID", "Price", "Bid Volume"],
+    "Item Attributes"  : ["Bid ID", "Incumbent"],                 # baseline/current optional
+    "Capacity"         : ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
+    "Rebates"          : ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
+    "Volume Discounts" : ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
+
+    # Legacy 9-tab files (full backwards compatibility)
     "Price"                  : ["Supplier Name", "Bid ID", "Price"],
     "Demand"                 : ["Bid ID", "Demand"],
     "Baseline Price"         : ["Bid ID", "Baseline Price", "Current Price"],
-    "Capacity"               : ["Supplier Name", "Capacity Scope", "Scope Value", "Capacity"],
-    "Rebate Tiers"           : ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
-    "Discount Tiers"         : ["Supplier Name", "Min", "Max", "Percentage", "Scope Attribute", "Scope Value"],
-    "Supplier Bid Attributes": ["Supplier Name", "Bid ID"]
+    "Supplier Bid Attributes": ["Supplier Name", "Bid ID"],
 }
+
+# ──────────────────────────────────────────────────────────────
+# Convert ONE “Bid Data” sheet into the classic sheets
+#   • emits a Baseline-Price sheet **only if** those columns exist
+# ──────────────────────────────────────────────────────────────
+def split_bid_data_sheet(bid_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """
+    Explodes the modern **Bid Data** tab into the four legacy tabs expected by
+    the optimiser.  Always returns ‘Price’, ‘Demand’ and ‘Supplier Bid Attributes’.
+
+    ‘Baseline Price’ is returned **only when** the Bid Data sheet actually
+    contains “Baseline Price” & “Current Price” columns; otherwise that legacy
+    sheet will be fabricated later from the separate *Item Attributes* tab.
+    """
+    # recognise optional freight columns
+    freight_cols = [c for c in ("Supplier Freight", "KBX") if c in bid_df.columns]
+
+    # ---- Price -----------------------------------------------------------
+    price_cols = ["Supplier Name", "Bid ID", "Price"] + freight_cols
+    price_df   = bid_df[price_cols].copy()
+
+    # ---- Demand ----------------------------------------------------------
+    demand_df = (
+        bid_df[["Bid ID", "Bid Volume"]]
+        .drop_duplicates("Bid ID")
+        .rename(columns={"Bid Volume": "Demand"})
+    )
+
+    # ---- Baseline / Current (emit only if present) -----------------------
+    have_baseline_cols = {"Baseline Price", "Current Price"} <= set(bid_df.columns)
+    if have_baseline_cols:
+        baseline_df = (
+            bid_df[["Bid ID", "Baseline Price", "Current Price"]]
+            .drop_duplicates("Bid ID")
+            .copy()
+        )
+    else:
+        baseline_df = None   # built later from Item Attributes if needed
+
+    # ---- Supplier-level attributes ---------------------------------------
+    drop_cols = set(price_cols + ["Bid Volume"])
+    if have_baseline_cols:
+        drop_cols |= {"Baseline Price", "Current Price"}
+    supp_cols = [c for c in bid_df.columns if c not in drop_cols]
+    supp_df   = bid_df[["Supplier Name", "Bid ID"] + supp_cols].copy()
+
+    # ---- bundle ----------------------------------------------------------
+    out = {
+        "Price"                  : price_df,
+        "Demand"                 : demand_df,
+        "Supplier Bid Attributes": supp_df,
+    }
+    if baseline_df is not None:
+        out["Baseline Price"] = baseline_df
+
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────────────

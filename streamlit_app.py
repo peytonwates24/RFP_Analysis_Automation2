@@ -293,21 +293,73 @@ def main():
             ]
 
         # Let the user upload Excel
+        # ──────────────────────────────────────────────────────────────────────────────
+        # Upload workbook & auto-convert if the user supplied the new 5-tab template
+        # ──────────────────────────────────────────────────────────────────────────────
         uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
-        
+
         if uploaded_file is not None:
             st.markdown("### Uploaded Worksheets")
             sheet_dfs = load_excel_sheets(uploaded_file)
+
+            # ──────────────────────────────────────────────────────────────
+            # 1)  EXPLODE a compact **Bid Data** tab → classic tabs
+            #     (Price · Demand · Supplier Bid Attributes)
+            #     Baseline/Current prices are *not* required here any more.
+            # ──────────────────────────────────────────────────────────────
+            if "Bid Data" in sheet_dfs:
+                classic_tabs = {"Price", "Demand", "Supplier Bid Attributes"}
+                # purge duplicate classic versions if user kept them by mistake
+                for dup in classic_tabs & sheet_dfs.keys():
+                    sheet_dfs.pop(dup, None)
+
+                sheet_dfs.update(split_bid_data_sheet(sheet_dfs["Bid Data"]))
+
+
+            # ──────────────────────────────────────────────────────────────
+            # 2)  If the **Baseline Price** tab is missing but we *do* have an
+            #     Item Attributes sheet that contains Baseline Price / Current Price,
+            #     build the legacy tab on-the-fly so the optimiser still works.
+            # ──────────────────────────────────────────────────────────────
+            if "Baseline Price" not in sheet_dfs and "Item Attributes" in sheet_dfs:
+                ia_df = sheet_dfs["Item Attributes"]
+                if {"Bid ID", "Baseline Price", "Current Price"} <= set(ia_df.columns):
+                    sheet_dfs["Baseline Price"] = (
+                        ia_df[["Bid ID", "Baseline Price", "Current Price"]]
+                        .drop_duplicates("Bid ID")
+                        .copy()
+                    )
+
+            # ──────────────────────────────────────────────────────────────
+            # 3)  Map modern tier names → legacy names the optimiser expects
+            # ──────────────────────────────────────────────────────────────
+            if "Rebates" in sheet_dfs and "Rebate Tiers" not in sheet_dfs:
+                sheet_dfs["Rebate Tiers"] = sheet_dfs["Rebates"]
+            if "Volume Discounts" in sheet_dfs and "Discount Tiers" not in sheet_dfs:
+                sheet_dfs["Discount Tiers"] = sheet_dfs["Volume Discounts"]
+
+            # ──────────────────────────────────────────────────────────────
+            # 4)  Basic column validation (after all auto-conversions)
+            # ──────────────────────────────────────────────────────────────
             for sheet_name, df in sheet_dfs.items():
                 missing = validate_sheet(df, sheet_name)
                 if missing:
-                    st.error(f"Missing required columns in '{sheet_name}': {', '.join(missing)}")
+                    st.error(
+                        f"Missing required column(s) in **{sheet_name}**: "
+                        f"{', '.join(missing)}"
+                    )
 
-            # ---------- Detect whether freight columns exist ----------
-            price_cols       = sheet_dfs["Price"].columns.str.strip().tolist()
+            # ──────────────────────────────────────────────────────────────
+            # 5)  Detect whether freight columns exist (either template)
+            # ──────────────────────────────────────────────────────────────
+            price_sheet_name = "Price" if "Price" in sheet_dfs else "Bid Data"
+            price_cols       = sheet_dfs[price_sheet_name].columns.str.strip().tolist()
             freight_enabled  = all(c in price_cols for c in ["Supplier Freight", "KBX"])
-            st.info(f"Freight logic **{'ENABLED' if freight_enabled else 'DISABLED'}** "
-                    f"(detected in Price sheet)")
+            st.info(
+                f"Freight logic **{'ENABLED' if freight_enabled else 'DISABLED'}** "
+                f"(detected in *{price_sheet_name}* tab)"
+            )
+
 
             ################################################################
             # 2) CUSTOM RULES EXPANDER (with Save & Single-run)
@@ -560,8 +612,11 @@ def main():
                 st.markdown("#### Run Current Rule Set")
                 if st.button("Run Current Ruleset"):
                     required_sheet_names = [
-                        "Item Attributes", "Price", "Demand", "Rebate Tiers", 
-                        "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+                        "Item Attributes", "Price", "Demand",
+                        "Rebate Tiers", "Discount Tiers",        # legacy
+                        "Rebates", "Volume Discounts",           # modern
+                        "Baseline Price", "Capacity",
+                        "Supplier Bid Attributes", "Bid Data"    # Bid Data is optional once split
                     ]
                     missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
                     if missing_sheets:
@@ -682,8 +737,11 @@ def main():
                         st.stop()
 
                     required_sheet_names = [
-                        "Item Attributes", "Price", "Demand", "Rebate Tiers", 
-                        "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+                        "Item Attributes", "Price", "Demand",
+                        "Rebate Tiers", "Discount Tiers",        # legacy
+                        "Rebates", "Volume Discounts",           # modern
+                        "Baseline Price", "Capacity",
+                        "Supplier Bid Attributes", "Bid Data"    # Bid Data is optional once split
                     ]
                     missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
                     if missing_sheets:
@@ -852,8 +910,11 @@ def main():
 
             # Final check for any leftover required sheets
             required_sheet_names = [
-                "Item Attributes", "Price", "Demand", "Rebate Tiers", 
-                "Discount Tiers", "Baseline Price", "Capacity", "Supplier Bid Attributes"
+                "Item Attributes", "Price", "Demand",
+                "Rebate Tiers", "Discount Tiers",        # legacy
+                "Rebates", "Volume Discounts",           # modern
+                "Baseline Price", "Capacity",
+                "Supplier Bid Attributes", "Bid Data"    # Bid Data is optional once split
             ]
             missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
             if missing_sheets:
@@ -1229,7 +1290,7 @@ def main():
                     # 5. Informative message for Scenario Summary dependencies
                     if "Scenario Summary" in selected_presentations:
                         st.info(
-                            "📌 The 'Scenario Summary' presentation requires at least one of the following Excel analyses to be selected: "
+                            " The 'Scenario Summary' presentation requires at least one of the following Excel analyses to be selected: "
                             + ", ".join(REQUIRED_ANALYSES_FOR_SCENARIO_SUMMARY) + "."
                         )
 
