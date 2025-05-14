@@ -747,28 +747,36 @@ def main():
                     ppt_output = BytesIO()
                     scenario_ppt_data = None
 
-                    # (A) Excel
+                    # (A) Excel  ───────────────────────────────────────────────────────
                     if output_format in ["Excel only", "Both"]:
                         if scenario_results_dict:
                             with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
                                 for s_name, df_scen in scenario_results_dict.items():
-                                    # Reorder columns if present
+
+                                    # Re-order columns (keep freight fields) – UPDATED
                                     if not df_scen.empty:
-                                        # Desired order
                                         desired_cols = [
                                             "Bid ID", "Bid ID Split", "Facility", "Incumbent",
                                             "Baseline Price", "Current Price", "Baseline Spend",
                                             "Awarded Supplier", "Original Awarded Supplier Price",
                                             "Percentage Volume Discount", "Discounted Awarded Supplier Price",
+                                            # ── new freight-aware columns ──
+                                            "Freight Method", "Freight Amount", "Effective Supplier Price",
+                                            # ───────────────────────────────
                                             "Awarded Supplier Spend", "Awarded Volume",
                                             "Baseline Savings", "Current Price Savings",
                                             "Rebate %", "Rebate Savings"
                                         ]
-                                        existing_cols = [c for c in desired_cols if c in df_scen.columns]
-                                        df_scen = df_scen.reindex(columns=existing_cols)
 
-                                    safe_sname = s_name[:31]
+                                        # first keep the desired cols that exist,
+                                        # then append any extras that may be present
+                                        ordered_cols  = [c for c in desired_cols if c in df_scen.columns]
+                                        ordered_cols += [c for c in df_scen.columns if c not in ordered_cols]
+                                        df_scen = df_scen[ordered_cols]
+
+                                    safe_sname = s_name[:31] or "Sheet1"
                                     df_scen.to_excel(writer, sheet_name=safe_sname, index=False)
+
                             excel_output.seek(0)
 
                             st.download_button(
@@ -780,6 +788,7 @@ def main():
                             st.success("All scenario results compiled into an Excel file.")
                         else:
                             st.error("No scenario produced valid results. Excel was not generated.")
+
 
                     # (B) PowerPoint
                     if output_format in ["PowerPoint only", "Both"]:
