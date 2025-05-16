@@ -10,6 +10,10 @@ from pptx.enum.dml import MSO_THEME_COLOR
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.dml.color import RGBColor
 from pptx.chart.data import CategoryChartData
+from modules.presentations import *
+
+
+LIGHT_BLUE = RGBColor(173, 216, 230)  
 
 def create_scenario_summary_slides(
     prs,
@@ -186,48 +190,74 @@ def create_scenario_summary_slides(
         p.font.name = "Calibri"
         p.alignment = PP_ALIGN.LEFT
 
-    def add_small_bar_chart(slide, scenario_dict, scenario_position):
+    # ────────────────────────────────────────────────────────────────
+    # BAR-CHART helper
+    # ────────────────────────────────────────────────────────────────
+    from pptx.dml.color import RGBColor
+    LIGHT_BLUE = RGBColor(173, 216, 230)   # rebate segment colour
+
+    # ------------------------------------------------------------
+    # Tiny stacked bar-chart (AST | Current with rebate overlay)
+    # ------------------------------------------------------------
+    def add_small_bar_chart(slide, scen_dict: dict, scenario_position: int):
         """
-        We place a small bar chart at the bottom of each scenario column. 
-        Here, bar_chart_values might look like [ total_baseline_savings, total_current_savings ]
-        with bar_chart_labels e.g. [ "Baseline", "Current" ].
+        Draws a 2-category stacked column chart at the bottom of a scenario column:
+
+            – savings_values : [AST $, Current $]
+            – rebate_values  : [rebate $, rebate $]   (stacked on both)
+
+        Colors:
+            • savings part  → Theme ACCENT_1 (dark blue)
+            • rebate part   → Theme ACCENT_2 (light blue)
         """
-        bar_vals = scenario_dict.get("bar_chart_values", [])
-        bar_labels = scenario_dict.get("bar_chart_labels", [])
-        if not bar_vals or not bar_labels:
-            return
+        savings_vals = scen_dict["savings_values"]
+        rebate_vals  = scen_dict["rebate_values"]
+        categories   = ["AST", "Current"]
 
         chart_data = CategoryChartData()
-        scenario_nm = scenario_dict.get("scenario_name", "Scenario")
-        chart_data.categories = [scenario_nm]
+        chart_data.categories = categories
+        chart_data.add_series("Savings", savings_vals)
+        chart_data.add_series("Rebates", rebate_vals)
 
-        # Add one series per label => 2 bars per scenario
-        for label, val in zip(bar_labels, bar_vals):
-            chart_data.add_series(label, [val])
+        # ── position (matches earlier layout) ────────────────────
+        left  = Inches(2.8) + (scenario_position - 1) * Inches(3.1)
+        top   = Inches(5.7)
+        width = Inches(2.5)
+        height= Inches(1.2)
 
-        left = Inches(2.8) + (scenario_position - 1)*Inches(3.1)
-        top  = Inches(5.7)
-        width= Inches(2.5)
-        height=Inches(1.2)
-
-        chart_shape = slide.shapes.add_chart(
-            XL_CHART_TYPE.COLUMN_CLUSTERED,
-            left, top, width, height,
-            chart_data
+        chart = (
+            slide.shapes
+            .add_chart(XL_CHART_TYPE.COLUMN_STACKED, left, top, width, height, chart_data)
+            .chart
         )
-        chart = chart_shape.chart
 
+        # color series
+        chart.series[0].format.fill.solid()
+        chart.series[0].format.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1  # dark blue
+
+        chart.series[1].format.fill.solid()
+        chart.series[1].format.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_2  # light blue
+
+        # legend & axes
         chart.has_legend = True
-        chart.legend.include_in_layout = False
         chart.legend.position = XL_LEGEND_POSITION.RIGHT
+        chart.legend.include_in_layout = False
 
-        # Hide axis lines to keep it minimal
-        cat_axis = chart.category_axis
-        cat_axis.visible = False
-        val_axis = chart.value_axis
-        val_axis.visible = False
+        chart.category_axis.visible = False
+        chart.value_axis.visible    = False
 
-    # ---------- MAIN LOGIC -----------
+        # data labels → show $MM on Savings only (top of stack)
+        for point, val in zip(chart.series[0].points, savings_vals):
+            point.data_label.number_format_is_linked = False
+            point.data_label.number_format = '"$"#,##0.0,,"MM"'
+            point.data_label.position = XL_LABEL_POSITION.OUTSIDE_END
+
+
+
+
+    # ────────────────────────────────────────────────────────────────
+    # MAIN LOGIC — assemble all slides
+    # ────────────────────────────────────────────────────────────────
     scenarios_per_slide = 3
     total_slides = (len(scenario_data_list) + scenarios_per_slide - 1) // scenarios_per_slide
     scenario_index = 0
@@ -236,7 +266,7 @@ def create_scenario_summary_slides(
         slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(slide_layout)
 
-        # Remove placeholders (since we do custom placements)
+        # Remove template placeholders (we place everything manually)
         for shape in list(slide.shapes):
             shape.element.getparent().remove(shape.element)
 
@@ -248,11 +278,167 @@ def create_scenario_summary_slides(
                 break
 
             scenario_dict = scenario_data_list[scenario_index]
-            add_scenario_content(slide, scenario_dict, scenario_position=(col_idx+1))
-            add_small_bar_chart(slide, scenario_dict, scenario_position=(col_idx+1))
+
+            # text content
+            add_scenario_content(slide, scenario_dict, scenario_position=col_idx + 1)
+            # stacked bar-chart
+            add_small_bar_chart(slide, scenario_dict, scenario_position=col_idx + 1)
 
             scenario_index += 1
 
     return prs
 
 
+# ──────────────────────────────────────────────────────────────
+# Helper: convert one scenario DataFrame → dict for the slides
+# ──────────────────────────────────────────────────────────────
+def _prepare_scenario_dict(df: "pd.DataFrame", scen_name: str) -> dict:
+    """
+    Expected numeric columns in *df* (will be auto-created as 0.0 if absent):
+
+        • 'Baseline Savings'        – savings vs baseline (AST)
+        • 'Current Price Savings'   – savings vs current price
+        • 'Rebate Savings'          – rebate-driven savings $
+        • 'Baseline Spend'          – total baseline spend
+
+    The function returns a dictionary that the updated
+    `create_scenario_summary_slides()` knows how to consume.
+    """
+
+    # ------------------------------------------------------------------
+    # 1) Ensure all required columns exist so .sum() never errors
+    # ------------------------------------------------------------------
+    required_cols = [
+        "Baseline Savings", "Current Price Savings",
+        "Rebate Savings", "Baseline Spend"
+    ]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # ------------------------------------------------------------------
+    # 2) Aggregate scenario-level numbers
+    # ------------------------------------------------------------------
+    total_baseline_save = float(df["Baseline Savings"].sum())          # AST savings
+    total_current_save  = float(df["Current Price Savings"].sum())     # Current-price savings
+    total_rebates       = float(df["Rebate Savings"].sum())            # rebate $ (single bucket)
+    total_base_spend    = float(df["Baseline Spend"].sum())
+
+    pct_ast    = (total_baseline_save / total_base_spend) if total_base_spend else 0.0
+    pct_current= (total_current_save  / total_base_spend) if total_base_spend else 0.0
+
+    # ------------------------------------------------------------------
+    # 3) Build the dictionary
+    # ------------------------------------------------------------------
+    scen_dict = {
+        # ── text fields shown in the table ────────────────────────────
+        "scenario_name":        scen_name.lstrip("#"),          # strip the leading '#'
+        "description":          "",                             # fill later as desired
+        "num_suppliers_text":   "",                             # optional
+        "rfp_savings_text":     f"{pct_ast:.1%} | {pct_current:.1%}",  # AST | Current
+        "value_opportunity_text": f"${(total_baseline_save + total_rebates)/1e6:,.1f} MM",
+        "key_considerations":   "",
+
+        # ── numeric series for the tiny stacked-column chart ─────────
+        # 2 categories → 0 = AST, 1 = Current
+        "savings_values": [total_baseline_save, total_current_save],
+        "rebate_values":  [total_rebates,      total_rebates]   # same rebate stacked on both
+    }
+
+    return scen_dict
+
+
+def process_scenario_dataframe(df, scenario_detail_grouping, require_grouping=True):
+    """
+    Processes the scenario DataFrame to ensure required columns are present.
+    If require_grouping=False, we do not insist on the scenario_detail_grouping column.
+
+    Parameters:
+    - df: DataFrame to process.
+    - scenario_detail_grouping: The grouping column name used for scenario details.
+    - require_grouping: boolean, if True scenario_detail_grouping must be included, otherwise it's optional.
+
+    Returns:
+    - df: Processed DataFrame with required columns added if necessary.
+    """
+
+    # Ensure columns are stripped
+    df.columns = df.columns.str.strip()
+
+    # Map existing columns to required columns
+    df = df.rename(columns={
+        'Awarded Supplier': 'Awarded Supplier Name'
+        # Add more mappings if necessary
+    })
+
+    # Base expected columns
+    expected_columns = [
+        'Awarded Supplier Name',
+        'Awarded Supplier Spend',
+        'AST Savings',
+        'Current Savings',
+        'AST Baseline Spend',
+        'Current Baseline Spend'
+    ]
+
+    # Only include scenario_detail_grouping if require_grouping is True
+    if require_grouping and scenario_detail_grouping:
+        expected_columns.append(scenario_detail_grouping)
+
+    # Calculate 'Awarded Supplier Spend' if not present
+    if 'Awarded Supplier Spend' not in df.columns:
+        if 'Awarded Supplier Price' in df.columns and 'Awarded Volume' in df.columns:
+            df['Awarded Supplier Spend'] = df['Awarded Supplier Price'] * df['Awarded Volume']
+        else:
+            df['Awarded Supplier Spend'] = 0
+
+    # 'AST Baseline Spend'
+    if 'AST Baseline Spend' not in df.columns:
+        if 'Baseline Spend' in df.columns:
+            df['AST Baseline Spend'] = df['Baseline Spend']
+        elif 'Baseline Price' in df.columns and 'Bid Volume' in df.columns:
+            df['AST Baseline Spend'] = df['Baseline Price'] * df['Bid Volume']
+        else:
+            df['AST Baseline Spend'] = 0
+
+    # 'AST Savings'
+    if 'AST Savings' not in df.columns:
+        df['AST Savings'] = df['AST Baseline Spend'] - df['Awarded Supplier Spend']
+
+    # 'Current Baseline Spend'
+    if 'Current Baseline Spend' not in df.columns:
+        if 'Current Price' in df.columns and 'Bid Volume' in df.columns:
+            df['Current Baseline Spend'] = df['Current Price'] * df['Bid Volume']
+        else:
+            df['Current Baseline Spend'] = df['AST Baseline Spend']
+
+    # 'Current Savings'
+    if 'Current Savings' not in df.columns:
+        df['Current Savings'] = df['Current Baseline Spend'] - df['Awarded Supplier Spend']
+
+    # Ensure 'Awarded Volume' exists
+    if 'Awarded Volume' not in df.columns:
+        if 'Bid Volume' in df.columns:
+            df['Awarded Volume'] = df['Bid Volume']
+        else:
+            df['Awarded Volume'] = 0
+
+    # Ensure 'Incumbent' exists
+    if 'Incumbent' not in df.columns:
+        df['Incumbent'] = 'Unknown'
+
+    # Ensure 'Bid ID' exists
+    if 'Bid ID' not in df.columns:
+        df['Bid ID'] = df.index
+
+    # Check expected columns
+    for col in expected_columns:
+        if col not in df.columns:
+            if col == scenario_detail_grouping and require_grouping:
+                # If grouping is required but not found, raise error
+                raise ValueError(f"Required grouping column '{scenario_detail_grouping}' not found in data.")
+            else:
+                # For non-grouping columns, just fill with 0 if not found
+                df[col] = 0
+
+    return df
