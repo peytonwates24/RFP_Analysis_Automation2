@@ -1290,7 +1290,7 @@ def main():
                     # 5. Informative message for Scenario Summary dependencies
                     if "Scenario Summary" in selected_presentations:
                         st.info(
-                            " The 'Scenario Summary' presentation requires at least one of the following Excel analyses to be selected: "
+                            "📌 The 'Scenario Summary' presentation requires at least one of the following Excel analyses to be selected: "
                             + ", ".join(REQUIRED_ANALYSES_FOR_SCENARIO_SUMMARY) + "."
                         )
 
@@ -2310,6 +2310,7 @@ def main():
                         # If no ppt_data is available, either user didn't select presentations
                         # or required conditions for certain presentations were not met.
                         logger.info("No presentation available for download.")
+
 
 
 
