@@ -735,12 +735,15 @@ def main():
             else:
                 st.info("No merged_data available; cannot configure scenario detail grouping yet.")
 
+
+
             ################################################################
-            # 3) SAVED SCENARIOS EXPANDER (with “Run All Scenarios”)
+            # 3) SAVED SCENARIOS EXPANDER (with “Run Outputs”)
             ################################################################
             with st.expander("Saved Scenarios", expanded=True):
                 st.markdown("#### Manage & Run All Scenarios")
 
+                # — List & delete saved scenarios —
                 if not st.session_state["scenario_definitions"]:
                     st.info("No saved scenarios yet.")
                 else:
@@ -749,269 +752,217 @@ def main():
                         with row1:
                             st.write(f"**Scenario:** {scen_name} ({len(rules_set)} rules)")
                         with row2:
-                            if st.button(f"Delete {scen_name}"):
+                            if st.button(f"Delete {scen_name}", key=f"del_{scen_name}"):
                                 del st.session_state["scenario_definitions"][scen_name]
                                 st.rerun()
 
-                st.markdown("#### Select Output Format")
-                output_format = st.radio(
-                    "Choose output format(s)",
-                    options=["Excel only", "PowerPoint only", "Both"],
-                    index=0
+                st.markdown("#### Run Outputs")
+                col_xl, col_ppt, col_opt = st.columns([1,1,1])
+
+                # Excel-only button
+                run_excel = col_xl.button(
+                    "Run All Scenarios (Excel)",
+                    key="run_excel_btn"
                 )
 
-                if st.button("Run All Scenarios"):
-                    if not st.session_state["scenario_definitions"]:
-                        st.error("No scenarios have been saved.")
-                        st.stop()
+                # PowerPoint-only button
+                run_ppt = col_ppt.button(
+                    "Run All Scenarios (PowerPoint)",
+                    key="run_ppt_btn"
+                )
 
-                    required_sheet_names = [
-                        "Item Attributes", "Price", "Demand",
-                        "Rebate Tiers", "Discount Tiers",        # legacy
-                        "Rebates", "Volume Discounts",           # modern
-                        "Baseline Price", "Capacity",
-                        "Supplier Bid Attributes", "Bid Data"    # Bid Data is optional once split
-                    ]
-                    missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
-                    if missing_sheets:
-                        st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Cannot run optimization.")
-                        st.stop()
+                # Include details checkbox + grouping dropdown
+                with col_opt:
+                    st.checkbox(
+                        "Include Scenario Details in PPT",
+                        key="ppt_details_on"
+                    )
+                    if st.session_state.ppt_details_on:
+                        grouping_choices = []
+                        if "Bid Data" in sheet_dfs:
+                            grouping_choices += sheet_dfs["Bid Data"].columns.tolist()
+                        if "Item Attributes" in sheet_dfs:
+                            grouping_choices += sheet_dfs["Item Attributes"].columns.tolist()
 
-                    # =========== UPDATED df_to_dict_baseline_price for multi-scenario =============
-                    def df_to_dict_baseline_price(df):
-                        d = {}
-                        for _, row in df.iterrows():
-                            bid = normalize_bid_id(row["Bid ID"])
-                            baseline_val = row.get("Baseline Price", 0.0)
-                            current_val  = row.get("Current Price", 0.0)
-                            d[bid] = {
-                                "baseline": baseline_val,
-                                "current":  current_val
-                            }
-                        return d
-
-                    try:
-                        item_attr_dict = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
-                        price_dict = df_to_dict_price(sheet_dfs["Price"])
-                        demand_dict = df_to_dict_demand(sheet_dfs["Demand"])
-                        baseline_price_dict = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])  # new function
-                        capacity_dict = df_to_dict_capacity(sheet_dfs["Capacity"])
-                        rebate_tiers_dict = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
-                        discount_tiers_dict = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
-                        supplier_bid_attr_dict = df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
-                        suppliers = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
-                    except Exception as e:
-                        st.error(f"Error preparing data for scenario runs: {e}")
-                        st.stop()
-
-
-                    # =========== Run all scenarios =============
-                    scenario_results_dict = {}
-                    infeasible_scenarios = []
-
-                    with st.spinner("Running all scenarios..."):
-                        for scenario_nm, the_rules in st.session_state["scenario_definitions"].items():
-                            try:
-                                # 1) run the optimizer
-                                out_file, feas, status = run_optimization(
-                                    capacity_data           = capacity_dict,
-                                    demand_data             = demand_dict,
-                                    item_attr_data          = item_attr_dict,
-                                    price_data              = price_dict,
-                                    rebate_tiers            = rebate_tiers_dict,
-                                    discount_tiers          = discount_tiers_dict,
-                                    baseline_price_data     = baseline_price_dict,
-                                    rules                   = the_rules,
-                                    supplier_bid_attr_dict  = supplier_bid_attr_dict,
-                                    suppliers               = suppliers,
-                                    freight_enabled         = freight_enabled
-                                )
-
-                                if status == "Infeasible":
-                                    infeasible_scenarios.append(scenario_nm)
-
-                                try:
-                                    # 2) load and clean the Results sheet
-                                    df_res = pd.read_excel(out_file, sheet_name="Results")
-                                    df_res.columns = df_res.columns.str.strip()
-
-                                    # 3) normalize to the names our PPT code expects
-                                    rename_map = {
-                                        "Savings":                   "Baseline Savings",
-                                        "CurrentSavings":            "Current Price Savings",
-                                        "Current Savings":           "Current Price Savings",
-                                        "RebateSavings":             "Rebate Savings",
-                                        "BaselineSpend":             "Baseline Spend",
-                                        "Baseline Spend":            "Baseline Spend",
-                                        "AwardedSupplierSpend":      "Awarded Supplier Spend",
-                                        "Awarded Supplier Spend":    "Awarded Supplier Spend",
-                                        "CurrentBaselineSpend":      "Current Baseline Spend",
-                                        "Current Baseline Spend":    "Current Baseline Spend"
-                                    }
-                                    df_res = df_res.rename(columns=rename_map)
-
-                                    # 4) if still missing, build Current Baseline Spend ourselves
-                                    if "Current Baseline Spend" not in df_res.columns:
-                                        if "Current Price" in df_res.columns and "Awarded Volume" in df_res.columns:
-                                            df_res["Current Baseline Spend"] = (
-                                                df_res["Current Price"] * df_res["Awarded Volume"]
-                                            )
-                                            logger.info(f"[{scenario_nm}] created 'Current Baseline Spend' = Current Price * Awarded Volume")
-                                        else:
-                                            logger.error(f"[{scenario_nm}] cannot create 'Current Baseline Spend' (missing columns)")
-
-                                    # 5) check that all critical columns are there
-                                    cols_to_check = [
-                                        "Baseline Spend",
-                                        "Current Baseline Spend",
-                                        "Awarded Supplier Spend",
-                                        "Baseline Savings",
-                                        "Current Price Savings"
-                                    ]
-                                    logger.info(f"[{scenario_nm}] columns after rename & creation: {df_res.columns.tolist()}")
-                                    for col in cols_to_check:
-                                        if col in df_res.columns:
-                                            logger.info(f"[{scenario_nm}] ✔ found column '{col}'")
-                                        else:
-                                            logger.error(f"[{scenario_nm}] ✖ MISSING column '{col}'")
-
-                                    # 6) recompute and compare the savings numbers
-                                    if "Baseline Spend" in df_res.columns and "Awarded Supplier Spend" in df_res.columns:
-                                        recomputed_base = (df_res["Baseline Spend"] - df_res["Awarded Supplier Spend"]).sum()
-                                        reported_base   = df_res.get("Baseline Savings", pd.Series(dtype=float)).sum()
-                                        logger.info(f"[{scenario_nm}] recomputed Baseline Savings = {recomputed_base:,} | reported = {reported_base:,}")
-
-                                    if "Current Baseline Spend" in df_res.columns and "Awarded Supplier Spend" in df_res.columns:
-                                        recomputed_curr = (df_res["Current Baseline Spend"] - df_res["Awarded Supplier Spend"]).sum()
-                                        reported_curr   = df_res.get("Current Price Savings", pd.Series(dtype=float)).sum()
-                                        logger.info(f"[{scenario_nm}] recomputed Current Savings  = {recomputed_curr:,} | reported = {reported_curr:,}")
-
-                                except Exception as load_err:
-                                    logger.exception(f"[{scenario_nm}] error loading/cleaning Results sheet")
-                                    df_res = pd.DataFrame()
-
-                                scenario_results_dict[scenario_nm] = df_res
-
-                            except Exception as run_err:
-                                logger.exception(f"Scenario '{scenario_nm}' run failed")
-                                st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
-                                scenario_results_dict[scenario_nm] = pd.DataFrame()
-
-
-                    excel_output = BytesIO()
-                    ppt_output = BytesIO()
-                    scenario_ppt_data = None
-
-                    # ───────────── Compile Excel (freight-aware ordering) ─────────────
-                    if output_format in ["Excel only", "Both"]:
-                        excel_output = BytesIO()
-                        with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
-                            for s_name, df_scen in scenario_results_dict.items():
-
-                                # always write a sheet so the workbook keeps its order
-                                if df_scen.empty:
-                                    df_scen.to_excel(
-                                        writer,
-                                        sheet_name=(s_name[:31] or "Sheet1"),
-                                        index=False
-                                    )
-                                    continue
-
-                                # ---------- column ordering ----------
-                                base_cols = [
-                                    "Bid ID", "Bid ID Split", "Facility", "Incumbent",
-                                    "Baseline Price", "Current Price", "Baseline Spend",
-                                    "Awarded Supplier", "Original Awarded Supplier Price",
-                                    "Percentage Volume Discount", "Discounted Awarded Supplier Price"
-                                ]
-                                freight_cols = ["Freight Method", "Freight Amount", "Effective Supplier Price"]
-                                tail_cols = [
-                                    "Awarded Supplier Spend", "Awarded Volume",
-                                    "Baseline Savings", "Current Price Savings",
-                                    "Rebate %", "Rebate Savings"
-                                ]
-
-                                desired_cols = (
-                                    base_cols +
-                                    (freight_cols if freight_enabled else []) +   # ← NEW: include only when freight is ON
-                                    tail_cols
-                                )
-                                ordered = [c for c in desired_cols if c in df_scen.columns]
-                                ordered += [c for c in df_scen.columns if c not in ordered]
-
-                                df_scen = df_scen[ordered]
-                                df_scen.to_excel(
-                                    writer,
-                                    sheet_name=(s_name[:31] or "Sheet1"),
-                                    index=False
-                                )
-
-                        excel_output.seek(0)
-                        st.download_button(
-                            "Download All Scenario Results (Excel)",
-                            data=excel_output.getvalue(),
-                            file_name="all_scenarios_results.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        st.selectbox(
+                            "Grouping for details",
+                            options=grouping_choices,
+                            key="scenario_detail_grouping",
+                            help="Choose which field to group your scenario-detail slides by"
                         )
-                        st.success("All scenario results compiled into an Excel file.")
-                    else:
-                        st.error("No scenario produced valid results. Excel was not generated.")
 
+                # Validate required sheets
+                required_sheet_names = [
+                    "Item Attributes", "Price", "Demand",
+                    "Rebate Tiers", "Discount Tiers",
+                    "Rebates", "Volume Discounts",
+                    "Baseline Price", "Capacity",
+                    "Supplier Bid Attributes", "Bid Data"
+                ]
+                missing_sheets = [s for s in required_sheet_names if s not in sheet_dfs]
+                if missing_sheets:
+                    st.error(f"Missing required sheets: {', '.join(missing_sheets)}. Cannot run optimization.")
+                    st.stop()
 
-                    # (B) PowerPoint
-                    if output_format in ["PowerPoint only", "Both"]:
-                        # Build scenario_dataframes for PPT
-                        scenario_dataframes = {}
-                        for scen_name, df_res in scenario_results_dict.items():
-                            scenario_dataframes[f"#{scen_name}"] = df_res.copy()
+                # ----- Prepare lookup dicts -----
+                def df_to_dict_baseline_price(df):
+                    d = {}
+                    for _, row in df.iterrows():
+                        bid = normalize_bid_id(row["Bid ID"])
+                        d[bid] = {
+                            "baseline": row.get("Baseline Price", 0.0),
+                            "current":  row.get("Current Price", 0.0)
+                        }
+                    return d
 
-                        # Possibly rename columns
-                        for key, dfp in scenario_dataframes.items():
-                            if "Baseline Savings" not in dfp.columns and "Savings" in dfp.columns:
-                                dfp["Baseline Savings"] = dfp["Savings"]
-                            if "Supplier Name" in dfp.columns and "Awarded Supplier" not in dfp.columns:
-                                dfp["Awarded Supplier"] = dfp["Supplier Name"]
+                try:
+                    item_attr_dict        = df_to_dict_item_attributes(sheet_dfs["Item Attributes"])
+                    price_dict            = df_to_dict_price(sheet_dfs["Price"])
+                    demand_dict           = df_to_dict_demand(sheet_dfs["Demand"])
+                    baseline_price_dict   = df_to_dict_baseline_price(sheet_dfs["Baseline Price"])
+                    capacity_dict         = df_to_dict_capacity(sheet_dfs["Capacity"])
+                    rebate_tiers_dict     = df_to_dict_tiers(sheet_dfs["Rebate Tiers"])
+                    discount_tiers_dict   = df_to_dict_tiers(sheet_dfs["Discount Tiers"])
+                    supplier_bid_attr_dict= df_to_dict_supplier_bid_attributes(sheet_dfs["Supplier Bid Attributes"])
+                    suppliers             = sheet_dfs["Price"]["Supplier Name"].dropna().astype(str).str.strip().unique().tolist()
+                except Exception as e:
+                    st.error(f"Error preparing data for scenario runs: {e}")
+                    st.stop()
 
-                        script_dir = os.path.dirname(os.path.abspath(__file__))
-                        template_file_path = os.path.join(script_dir, 'Slide template.pptx')
+                # =========== Run all scenarios ============
+                scenario_results_dict = {}
+                infeasible_scenarios  = []
 
-                        prs = create_scenario_summary_presentation(scenario_dataframes, template_file_path=template_file_path)
-                        if prs is not None:
-                            prs.save(ppt_output)
-                            scenario_ppt_data = ppt_output.getvalue()
-                            st.success("All scenario results compiled into a PowerPoint file.")
-
-                            st.download_button(
-                                label="Download Scenario Summary (PowerPoint)",
-                                data=scenario_ppt_data,
-                                file_name="scenario_summary.pptx",
-                                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                with st.spinner("Running all scenarios..."):
+                    for scenario_nm, the_rules in st.session_state["scenario_definitions"].items():
+                        try:
+                            out_file, feas, status = run_optimization(
+                                capacity_dict,
+                                demand_dict,
+                                item_attr_dict,
+                                price_dict,
+                                rebate_tiers_dict,
+                                discount_tiers_dict,
+                                baseline_price_dict,
+                                rules=the_rules,
+                                supplier_bid_attr_dict=supplier_bid_attr_dict,
+                                suppliers=suppliers,
+                                freight_enabled=freight_enabled
                             )
-                        else:
-                            st.error("Failed to generate PowerPoint summary.")
+                            if status == "Infeasible":
+                                infeasible_scenarios.append(scenario_nm)
 
-                    if infeasible_scenarios:
-                        st.warning(
-                            "Some scenarios were infeasible: "
-                            + ", ".join(infeasible_scenarios)
-                            + ". Their sheets/slides may be empty or partial."
+                            try:
+                                df_res = pd.read_excel(out_file, sheet_name="Results")
+                                df_res.columns = df_res.columns.str.strip()
+
+                                # normalize column names
+                                rename_map = {
+                                    "Savings":              "Baseline Savings",
+                                    "CurrentSavings":       "Current Price Savings",
+                                    "Current Savings":      "Current Price Savings",
+                                    "RebateSavings":        "Rebate Savings",
+                                    "BaselineSpend":        "Baseline Spend",
+                                    "AwardedSupplierSpend": "Awarded Supplier Spend",
+                                    "CurrentBaselineSpend": "Current Baseline Spend"
+                                }
+                                df_res = df_res.rename(columns=rename_map)
+
+                                # backfill Current Baseline Spend if missing
+                                if "Current Baseline Spend" not in df_res.columns:
+                                    if all(c in df_res.columns for c in ["Current Price","Awarded Volume"]):
+                                        df_res["Current Baseline Spend"] = (
+                                            df_res["Current Price"] * df_res["Awarded Volume"]
+                                        )
+                                        logger.info(f"[{scenario_nm}] built Current Baseline Spend")
+                            except Exception:
+                                df_res = pd.DataFrame()
+
+                            scenario_results_dict[scenario_nm] = df_res
+
+                        except Exception as run_err:
+                            st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
+                            scenario_results_dict[scenario_nm] = pd.DataFrame()
+
+                # ───────────── Compile Excel ─────────────
+                if run_excel:
+                    excel_output = BytesIO()
+                    with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
+                        for s_name, df_scen in scenario_results_dict.items():
+                            if df_scen.empty:
+                                df_scen.to_excel(writer, sheet_name=(s_name[:31] or "Sheet1"), index=False)
+                                continue
+                            # (re-)order columns as needed...
+                            df_scen.to_excel(writer, sheet_name=(s_name[:31] or "Sheet1"), index=False)
+                    excel_output.seek(0)
+                    st.download_button(
+                        "Download All Scenario Results (Excel)",
+                        data=excel_output.getvalue(),
+                        file_name="all_scenarios_results.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    st.success("Excel file ready.")
+
+                # ───────────── Compile PowerPoint ─────────────
+                if run_ppt:
+                    # prepare DataFrames for PPT
+                    scenario_dataframes = { f"#{nm}": df.copy() for nm, df in scenario_results_dict.items() }
+
+                    # normalize summary columns
+                    for dfp in scenario_dataframes.values():
+                        if "Baseline Savings" not in dfp.columns and "Savings" in dfp.columns:
+                            dfp["Baseline Savings"] = dfp["Savings"]
+                        if "Supplier Name" in dfp.columns and "Awarded Supplier" not in dfp.columns:
+                            dfp["Awarded Supplier"] = dfp["Supplier Name"]
+
+                    # backfill grouping if requested
+                    if st.session_state.ppt_details_on:
+                        grouping = st.session_state.get("scenario_detail_grouping")
+                        for key, dfp in scenario_dataframes.items():
+                            if grouping and grouping not in dfp.columns:
+                                if "Bid Data" in sheet_dfs and grouping in sheet_dfs["Bid Data"].columns:
+                                    dfp = dfp.merge(
+                                        sheet_dfs["Bid Data"][["Bid ID", grouping]],
+                                        on="Bid ID", how="left"
+                                    )
+                                elif "Item Attributes" in sheet_dfs and grouping in sheet_dfs["Item Attributes"].columns:
+                                    dfp = dfp.merge(
+                                        sheet_dfs["Item Attributes"][["Bid ID", grouping]],
+                                        on="Bid ID", how="left"
+                                    )
+                                scenario_dataframes[key] = dfp
+
+                    # locate PPT template
+                    import os
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    template_file_path = os.path.join(script_dir, 'Slide template.pptx')
+
+                    # build summary + (optional) details
+                    prs = create_scenario_summary_slides(
+                        prs=Presentation(template_file_path),
+                        scenario_dataframes=scenario_dataframes,
+                        scenario_detail_grouping=None,
+                        title_suffix="",
+                        create_details=False
+                    )
+                    if st.session_state.ppt_details_on:
+                        prs = create_scenario_detail_slides(
+                            prs,
+                            scenario_dataframes,
+                            scenario_detail_grouping=st.session_state["scenario_detail_grouping"]
                         )
 
-            # Final check for any leftover required sheets
-            required_sheet_names = [
-                "Item Attributes", "Price", "Demand",
-                "Rebate Tiers", "Discount Tiers",        # legacy
-                "Rebates", "Volume Discounts",           # modern
-                "Baseline Price", "Capacity",
-                "Supplier Bid Attributes", "Bid Data"    # Bid Data is optional once split
-            ]
-            missing_sheets = [sheet for sheet in required_sheet_names if sheet not in sheet_dfs]
-            if missing_sheets:
-                st.error(
-                    f"Missing required sheets: {', '.join(missing_sheets)}. "
-                    "Please upload an Excel file that contains all of these sheets."
-                )
-                st.stop()
+                    # download
+                    ppt_buf = BytesIO()
+                    prs.save(ppt_buf)
+                    st.download_button(
+                        "Download Scenario Summary (PowerPoint)",
+                        data=ppt_buf.getvalue(),
+                        file_name="scenario_summary.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                    st.success("PowerPoint file ready.")
+
 
 
 
