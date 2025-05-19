@@ -20,6 +20,7 @@ from modules.optimization import *
 import logging
 import uuid 
 from modules.ppt_scenario import *
+from modules.presentations import logger
 
 
 
@@ -674,8 +675,36 @@ def main():
                         try:
                             # We assume run_optimization now produces columns:
                             #   Bid ID, Bid ID Split, Facility, Incumbent, Baseline Price, Current Price, ...
+                            # 1) Load results
                             df_results = pd.read_excel(out_file, sheet_name="Results")
-                            st.dataframe(df_results)
+                        
+                            # 2) strip whitespace from all column names
+                            df_results.columns = df_results.columns.str.strip()
+
+
+                            # 3) rename any aliases → the exact names ppt_scenario expects
+                            df_results = df_results.rename(columns={
+                                "Savings"               : "Baseline Savings",
+                                "CurrentSavings"        : "Current Price Savings",
+                                "RebateSavings"         : "Rebate Savings",
+                                "BaselineSpend"         : "Baseline Spend",                               
+                            })
+                        
+                        
+                            # 3) sanity‐check: all required cols are present
+                            required_cols = [
+                                "Baseline Savings",
+                                "Current Price Savings",
+                                "Rebate Savings",
+                                "Baseline Spend"
+                            ]
+                            missing = [c for c in required_cols if c not in df_results.columns]
+                            if missing:
+                                st.error(f"PPT needs these columns but they’re missing: {missing}")
+                                st.stop()
+
+                                st.dataframe(df_results)
+                            
                             with open(out_file, "rb") as f:
                                 st.download_button("Download Results", f, file_name="optimization_results.xlsx")
                         except Exception as e:
@@ -775,39 +804,99 @@ def main():
                         st.error(f"Error preparing data for scenario runs: {e}")
                         st.stop()
 
-                    from io import BytesIO
+
+                    # =========== Run all scenarios =============
                     scenario_results_dict = {}
                     infeasible_scenarios = []
 
                     with st.spinner("Running all scenarios..."):
                         for scenario_nm, the_rules in st.session_state["scenario_definitions"].items():
                             try:
+                                # 1) run the optimizer
                                 out_file, feas, status = run_optimization(
-                                    capacity_data       = capacity_dict,
-                                    demand_data         = demand_dict,
-                                    item_attr_data      = item_attr_dict,
-                                    price_data          = price_dict,
-                                    rebate_tiers        = rebate_tiers_dict,
-                                    discount_tiers      = discount_tiers_dict,
-                                    baseline_price_data = baseline_price_dict,
-                                    rules               = the_rules,
-                                    supplier_bid_attr_dict = supplier_bid_attr_dict,
-                                    suppliers           = suppliers,
-                                    freight_enabled     = freight_enabled   # ← NEW ARG
+                                    capacity_data           = capacity_dict,
+                                    demand_data             = demand_dict,
+                                    item_attr_data          = item_attr_dict,
+                                    price_data              = price_dict,
+                                    rebate_tiers            = rebate_tiers_dict,
+                                    discount_tiers          = discount_tiers_dict,
+                                    baseline_price_data     = baseline_price_dict,
+                                    rules                   = the_rules,
+                                    supplier_bid_attr_dict  = supplier_bid_attr_dict,
+                                    suppliers               = suppliers,
+                                    freight_enabled         = freight_enabled
                                 )
 
                                 if status == "Infeasible":
                                     infeasible_scenarios.append(scenario_nm)
 
                                 try:
+                                    # 2) load and clean the Results sheet
                                     df_res = pd.read_excel(out_file, sheet_name="Results")
-                                except:
+                                    df_res.columns = df_res.columns.str.strip()
+
+                                    # 3) normalize to the names our PPT code expects
+                                    rename_map = {
+                                        "Savings":                   "Baseline Savings",
+                                        "CurrentSavings":            "Current Price Savings",
+                                        "Current Savings":           "Current Price Savings",
+                                        "RebateSavings":             "Rebate Savings",
+                                        "BaselineSpend":             "Baseline Spend",
+                                        "Baseline Spend":            "Baseline Spend",
+                                        "AwardedSupplierSpend":      "Awarded Supplier Spend",
+                                        "Awarded Supplier Spend":    "Awarded Supplier Spend",
+                                        "CurrentBaselineSpend":      "Current Baseline Spend",
+                                        "Current Baseline Spend":    "Current Baseline Spend"
+                                    }
+                                    df_res = df_res.rename(columns=rename_map)
+
+                                    # 4) if still missing, build Current Baseline Spend ourselves
+                                    if "Current Baseline Spend" not in df_res.columns:
+                                        if "Current Price" in df_res.columns and "Awarded Volume" in df_res.columns:
+                                            df_res["Current Baseline Spend"] = (
+                                                df_res["Current Price"] * df_res["Awarded Volume"]
+                                            )
+                                            logger.info(f"[{scenario_nm}] created 'Current Baseline Spend' = Current Price * Awarded Volume")
+                                        else:
+                                            logger.error(f"[{scenario_nm}] cannot create 'Current Baseline Spend' (missing columns)")
+
+                                    # 5) check that all critical columns are there
+                                    cols_to_check = [
+                                        "Baseline Spend",
+                                        "Current Baseline Spend",
+                                        "Awarded Supplier Spend",
+                                        "Baseline Savings",
+                                        "Current Price Savings"
+                                    ]
+                                    logger.info(f"[{scenario_nm}] columns after rename & creation: {df_res.columns.tolist()}")
+                                    for col in cols_to_check:
+                                        if col in df_res.columns:
+                                            logger.info(f"[{scenario_nm}] ✔ found column '{col}'")
+                                        else:
+                                            logger.error(f"[{scenario_nm}] ✖ MISSING column '{col}'")
+
+                                    # 6) recompute and compare the savings numbers
+                                    if "Baseline Spend" in df_res.columns and "Awarded Supplier Spend" in df_res.columns:
+                                        recomputed_base = (df_res["Baseline Spend"] - df_res["Awarded Supplier Spend"]).sum()
+                                        reported_base   = df_res.get("Baseline Savings", pd.Series(dtype=float)).sum()
+                                        logger.info(f"[{scenario_nm}] recomputed Baseline Savings = {recomputed_base:,} | reported = {reported_base:,}")
+
+                                    if "Current Baseline Spend" in df_res.columns and "Awarded Supplier Spend" in df_res.columns:
+                                        recomputed_curr = (df_res["Current Baseline Spend"] - df_res["Awarded Supplier Spend"]).sum()
+                                        reported_curr   = df_res.get("Current Price Savings", pd.Series(dtype=float)).sum()
+                                        logger.info(f"[{scenario_nm}] recomputed Current Savings  = {recomputed_curr:,} | reported = {reported_curr:,}")
+
+                                except Exception as load_err:
+                                    logger.exception(f"[{scenario_nm}] error loading/cleaning Results sheet")
                                     df_res = pd.DataFrame()
 
                                 scenario_results_dict[scenario_nm] = df_res
-                            except Exception as e:
-                                st.warning(f"Scenario '{scenario_nm}' failed: {e}")
+
+                            except Exception as run_err:
+                                logger.exception(f"Scenario '{scenario_nm}' run failed")
+                                st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
                                 scenario_results_dict[scenario_nm] = pd.DataFrame()
+
 
                     excel_output = BytesIO()
                     ppt_output = BytesIO()
