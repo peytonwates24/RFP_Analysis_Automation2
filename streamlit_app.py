@@ -904,57 +904,25 @@ def main():
                     st.success("Excel file ready.")
 
                 # ───────────── Compile PowerPoint ─────────────
+                from modules.ppt_scenario import create_scenario_summary_presentation
+
+                # … inside your “if run_ppt:” block …
+
                 if run_ppt:
-                    # prepare DataFrames for PPT
-                    scenario_dataframes = { f"#{nm}": df.copy() for nm, df in scenario_results_dict.items() }
+                    # optional: use your corporate template
+                    template_path = os.path.join(os.path.dirname(__file__), "Slide template.pptx")
 
-                    # normalize summary columns
-                    for dfp in scenario_dataframes.values():
-                        if "Baseline Savings" not in dfp.columns and "Savings" in dfp.columns:
-                            dfp["Baseline Savings"] = dfp["Savings"]
-                        if "Supplier Name" in dfp.columns and "Awarded Supplier" not in dfp.columns:
-                            dfp["Awarded Supplier"] = dfp["Supplier Name"]
-
-                    # backfill grouping if requested
-                    if st.session_state.ppt_details_on:
-                        grouping = st.session_state.get("scenario_detail_grouping")
-                        for key, dfp in scenario_dataframes.items():
-                            if grouping and grouping not in dfp.columns:
-                                if "Bid Data" in sheet_dfs and grouping in sheet_dfs["Bid Data"].columns:
-                                    dfp = dfp.merge(
-                                        sheet_dfs["Bid Data"][["Bid ID", grouping]],
-                                        on="Bid ID", how="left"
-                                    )
-                                elif "Item Attributes" in sheet_dfs and grouping in sheet_dfs["Item Attributes"].columns:
-                                    dfp = dfp.merge(
-                                        sheet_dfs["Item Attributes"][["Bid ID", grouping]],
-                                        on="Bid ID", how="left"
-                                    )
-                                scenario_dataframes[key] = dfp
-
-                    # locate PPT template
-                    import os
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    template_file_path = os.path.join(script_dir, 'Slide template.pptx')
-
-                    # build summary + (optional) details
-                    prs = create_scenario_summary_slides(
-                        prs=Presentation(template_file_path),
-                        scenario_dataframes=scenario_dataframes,
-                        scenario_detail_grouping=None,
-                        title_suffix="",
-                        create_details=False
+                    # scenario_results_dict: { "Best of Best": df1, "As-is": df2, … }
+                    prs = create_scenario_summary_presentation(
+                        scenario_dfs    = scenario_results_dict,
+                        template_file_path = template_path
                     )
-                    if st.session_state.ppt_details_on:
-                        prs = create_scenario_detail_slides(
-                            prs,
-                            scenario_dataframes,
-                            scenario_detail_grouping=st.session_state["scenario_detail_grouping"]
-                        )
 
-                    # download
+                    # serialize & surface download
                     ppt_buf = BytesIO()
                     prs.save(ppt_buf)
+                    ppt_buf.seek(0)
+
                     st.download_button(
                         "Download Scenario Summary (PowerPoint)",
                         data=ppt_buf.getvalue(),
@@ -962,6 +930,7 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
                     st.success("PowerPoint file ready.")
+
 
 
 
