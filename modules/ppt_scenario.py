@@ -346,3 +346,241 @@ def create_scenario_summary_presentation(
     else:
         prs = Presentation()
     return create_scenario_summary_slides(prs, scenario_dfs)
+
+
+# ppt_scenario.py
+import pandas as pd
+from itertools import cycle
+
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
+from pptx.chart.data import ChartData
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.dml import MSO_THEME_COLOR
+from pptx.dml.color import RGBColor
+
+def add_scenario_detail_slides(
+    prs: Presentation,
+    scenario_dfs: dict,
+    grouping_col: str,
+    template_slide_layout_index: int,
+    detail_columns: list = []
+):
+    from itertools import cycle
+    from pptx.util import Inches, Pt
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
+    from pptx.chart.data import ChartData
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.dml import MSO_THEME_COLOR
+    from pptx.dml.color import RGBColor
+
+    palette = cycle([
+        RGBColor(68,114,196), RGBColor(237,125,49), RGBColor(165,165,165),
+        RGBColor(255,192,0),   RGBColor(112,173,71)
+    ])
+    layout = prs.slide_layouts[template_slide_layout_index]
+
+    for scen_name, raw_df in scenario_dfs.items():
+        df = raw_df.copy()
+        df.columns = df.columns.str.strip()
+        # ensure grouping & detail cols exist
+        if grouping_col not in df: df[grouping_col] = ""
+        for col in detail_columns:
+            if col not in df: df[col] = ""
+
+        # standardize names
+        if "Awarded Supplier Name" in df: df.rename({"Awarded Supplier Name":"Awarded Supplier"}, axis=1, inplace=True)
+        if "Bid Volume" in df and "Awarded Volume" not in df: df["Awarded Volume"] = df["Bid Volume"]
+        if "Current Price Savings" in df and "Current Savings" not in df: df.rename({"Current Price Savings":"Current Savings"}, axis=1, inplace=True)
+        if "Discounted Awarded Supplier Price" in df and "Effective Supplier Price" not in df:
+            df.rename({"Discounted Awarded Supplier Price":"Effective Supplier Price"}, axis=1, inplace=True)
+
+        # slide & clear
+        slide = prs.slides.add_slide(layout)
+        for shp in list(slide.shapes):
+            slide.shapes._spTree.remove(shp._element)
+
+        # header
+        hdr = slide.shapes.add_textbox(Inches(0), Inches(0.01), Inches(12.5), Inches(0.5))
+        tf = hdr.text_frame; tf.vertical_anchor = MSO_ANCHOR.TOP
+        p = tf.paragraphs[0]
+        p.text = f"{scen_name} Scenario Details"
+        p.font.name, p.font.size, p.font.bold = "Calibri", Pt(25), True
+        p.font.color.rgb = RGBColor(0,51,153)
+        hdr.fill.background(); hdr.line.fill.background()
+
+        # stacked bar chart
+        total_vol = df["Awarded Volume"].sum() or 1
+        vol_df = df.groupby("Awarded Supplier")["Awarded Volume"].sum().reset_index()
+        vol_df["pct"] = vol_df["Awarded Volume"] / total_vol
+        cd = ChartData(); cd.categories = ['']
+        for _, r in vol_df.iterrows():
+            cd.add_series(r["Awarded Supplier"], [r["pct"]])
+        chart = slide.shapes.add_chart(
+            XL_CHART_TYPE.BAR_STACKED,
+            Inches(0), Inches(0.3),
+            Inches(9.0), Inches(1.7),
+            cd
+        ).chart
+        chart.has_title = True
+        chart.chart_title.text_frame.text = "% of Volume"
+        chart.has_legend = True
+        chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        for series in chart.series:
+            clr = next(palette)
+            series.format.fill.solid()
+            series.format.fill.fore_color.rgb = clr
+            series.has_data_labels = True
+            dl = series.data_labels
+            dl.number_format = '0%'
+            dl.position = XL_LABEL_POSITION.INSIDE_BASE
+            dl.font.size = Pt(10)
+            dl.font.color.rgb = RGBColor(255,255,255)
+
+        # Info boxes—**both at top = 0.65in**!
+        num_items = df["Bid ID"].nunique()
+        num_trans = df[df["Awarded Supplier"] != df["Incumbent"]]["Bid ID"].nunique()
+
+        # Items box (left=8.97, top=0.65)
+        box_items = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(8.97), Inches(0.65),
+            Inches(2.0), Inches(1.0)
+        )
+        box_items.fill.solid(); box_items.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_2
+        box_items.line.fill.background()
+        tb_i = box_items.text_frame
+        tb_i.text = f"# of items\n{num_items}"
+        tb_i.vertical_anchor = MSO_ANCHOR.MIDDLE
+        for par in tb_i.paragraphs:
+            par.alignment = PP_ALIGN.CENTER
+            par.font.size = Pt(20)
+            par.font.color.rgb = RGBColor(255,255,255)
+
+        # build summary data
+        summary = []
+        for grp, sub in df.groupby(grouping_col, sort=False):
+            vol = sub["Awarded Volume"].sum()
+            avg_cur = sub["Current Price"].mean() if "Current Price" in sub else 0
+            cur_sp = avg_cur*vol
+            avg_bid = sub["Effective Supplier Price"].mean() if "Effective Supplier Price" in sub else 0
+            bid_sp = avg_bid*vol
+            sav = sub["Current Savings"].sum()
+            summary.append({
+                "Grouping": grp,
+                **{col: ", ".join(sub[col].dropna().astype(str).unique()) for col in detail_columns},
+                "Bid Volume": vol,
+                "Avg Current Price": avg_cur,
+                "Current Spend": cur_sp,
+                "Avg Bid Price": avg_bid,
+                "Bid Spend": bid_sp,
+                "Current Savings": sav,
+                "Incumbent Dist": sub.groupby("Incumbent")["Awarded Volume"].sum().reset_index(),
+                "Awarded Dist":   sub.groupby("Awarded Supplier")["Awarded Volume"].sum().reset_index()
+            })
+
+        # table
+        cols = ["Grouping"] + detail_columns + [
+            "Bid Volume","Incumbent","Avg Current Price","Current Spend",
+            "Awarded Supplier","Avg Bid Price","Bid Spend","Current Savings"
+        ]
+        rows = len(summary)+2
+        left, top = Inches(0.5), Inches(2.0)
+        width = Inches(12.5)
+        table = slide.shapes.add_table(rows, len(cols), left, top, width, Inches(1.0)).table
+
+        # col widths & row heights
+        table.columns[2].width = Inches(1.5)
+        table.columns[5].width = Inches(1.5)
+        table.rows[0].height = Inches(0.38)
+        for i in range(1, len(summary)+1):
+            table.rows[i].height = Inches(1.0)
+        table.rows[len(summary)+1].height = Inches(0.38)
+
+        # headers
+        for j, hdr in enumerate(cols):
+            cell = table.cell(0,j)
+            cell.text = hdr
+            p = cell.text_frame.paragraphs[0]
+            p.font.bold = True
+            p.font.size = Pt(12)
+            p.font.name = "Calibri"
+            p.alignment = PP_ALIGN.CENTER
+
+        # populate & pies
+        for i, data in enumerate(summary, start=1):
+            for j, col in enumerate(cols):
+                if col not in ("Incumbent","Awarded Supplier"):
+                    val = data.get(col, "")
+                    if col in ("Avg Current Price","Avg Bid Price"):
+                        txt = f"${val:.2f}"
+                    elif col in ("Current Spend","Bid Spend","Current Savings"):
+                        txt = f"${(val/1_000_000):.1f}MM"
+                    else:
+                        txt = str(val)
+                    cell = table.cell(i,j)
+                    cell.text = txt
+                    cell.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+                    cell.text_frame.paragraphs[0].font.size = Pt(10)
+
+            # pies for incumbent & awarded
+            for dist_key, col_idx in [("Incumbent Dist",2),("Awarded Dist",5)]:
+                dist = data[dist_key]
+                cd2 = ChartData()
+                cd2.categories = dist.iloc[:,0].tolist()
+                cd2.add_series("", dist.iloc[:,1].tolist())
+
+                cell_left = left + sum(table.columns[x].width for x in range(col_idx))
+                cell_top  = top  + table.rows[0].height + table.rows[i].height*(i-1)
+                cell_w = table.columns[col_idx].width
+                cell_h = table.rows[i].height
+
+                pie = slide.shapes.add_chart(
+                    XL_CHART_TYPE.PIE,
+                    cell_left, cell_top, cell_w, cell_h,
+                    cd2
+                ).chart
+                pie.has_title = False
+                pie.has_legend = False
+                for pt in pie.series[0].points:
+                    clr = next(palette)
+                    pt.format.fill.solid()
+                    pt.format.fill.fore_color.rgb = clr
+
+        # totals row (larger text)
+        tr = len(summary)+1
+        vol_tot = sum(r["Bid Volume"] for r in summary)
+        cur_tot = sum(r["Current Spend"] for r in summary)
+        bid_tot = sum(r["Bid Spend"] for r in summary)
+        sav_tot = sum(r["Current Savings"] for r in summary)
+        avg_cur_tot = sum(r["Avg Current Price"]*r["Bid Volume"] for r in summary)/vol_tot
+        avg_bid_tot = sum(r["Avg Bid Price"]*r["Bid Volume"] for r in summary)/vol_tot
+
+        totals = {
+            "Grouping":"Totals",
+            "Bid Volume":vol_tot,
+            "Avg Current Price":avg_cur_tot,
+            "Current Spend":cur_tot,
+            "Avg Bid Price":avg_bid_tot,
+            "Bid Spend":bid_tot,
+            "Current Savings":sav_tot
+        }
+        for j, col in enumerate(cols):
+            cell = table.cell(tr,j)
+            val = totals.get(col, "")
+            if isinstance(val, (int,float)):
+                if col in ("Avg Current Price","Avg Bid Price"):
+                    text = f"${val:.2f}"
+                else:
+                    text = f"${(val/1_000_000):.1f}MM"
+            else:
+                text = str(val)
+            cell.text = text
+            p = cell.text_frame.paragraphs[0]
+            p.font.bold = True
+            p.font.size = Pt(12)
+            p.font.name = "Calibri"
+            p.alignment = PP_ALIGN.CENTER

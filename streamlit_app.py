@@ -778,6 +778,7 @@ def main():
                         key="ppt_details_on"
                     )
                     if st.session_state.ppt_details_on:
+                        # 1) grouping dropdown (unchanged)
                         grouping_choices = []
                         if "Bid Data" in sheet_dfs:
                             grouping_choices += sheet_dfs["Bid Data"].columns.tolist()
@@ -790,6 +791,47 @@ def main():
                             key="scenario_detail_grouping",
                             help="Choose which field to group your scenario-detail slides by"
                         )
+
+                        # 2) extras multiselect
+                        all_cols = []
+                        if "Bid Data" in sheet_dfs:
+                            all_cols += sheet_dfs["Bid Data"].columns.tolist()
+                        if "Item Attributes" in sheet_dfs:
+                            all_cols += sheet_dfs["Item Attributes"].columns.tolist()
+
+                        # columns we always include (never shown as extras)
+                        mandatory = {
+                            "Bid ID",
+                            "Current Price",
+                            "Awarded Supplier",
+                            "Effective Supplier Price",
+                            "Awarded Volume",
+                            "Current Price Savings",
+                            st.session_state.scenario_detail_grouping
+                        }
+
+                        # **new**: also exclude these entirely from the UI
+                        exclude_cols = {
+                            "Bid Volume",
+                            "Price",
+                            "Supplier Name",
+                            "Baseline Price"
+                        }
+
+                        # build the list of user‐selectable extras
+                        extras = [
+                            c for c in all_cols
+                            if c not in mandatory
+                            and c not in exclude_cols
+                        ]
+
+                        st.multiselect(
+                            "Additional detail columns",
+                            options=extras,
+                            default=[],
+                            key="scenario_detail_columns"
+                        )
+
 
                 # Validate required sheets
                 required_sheet_names = [
@@ -904,32 +946,43 @@ def main():
                     st.success("Excel file ready.")
 
                 # ───────────── Compile PowerPoint ─────────────
-                from modules.ppt_scenario import create_scenario_summary_presentation
-
-                # … inside your “if run_ppt:” block …
-
                 if run_ppt:
-                    # optional: use your corporate template
-                    template_path = os.path.join(os.path.dirname(__file__), "Slide template.pptx")
-
-                    # scenario_results_dict: { "Best of Best": df1, "As-is": df2, … }
-                    prs = create_scenario_summary_presentation(
-                        scenario_dfs    = scenario_results_dict,
-                        template_file_path = template_path
+                    template_file_path = os.path.join(
+                        os.path.dirname(__file__),
+                        "Slide template.pptx"
                     )
 
-                    # serialize & surface download
+                    # 1) summary slides
+                    prs = create_scenario_summary_presentation(
+                        scenario_dfs       = scenario_results_dict,
+                        template_file_path = template_file_path
+                    )
+
+                    # 2) detail slides if requested
+                    if st.session_state.ppt_details_on:
+                        add_scenario_detail_slides(
+                            prs                         = prs,
+                            scenario_dfs                = scenario_results_dict,
+                            grouping_col                = st.session_state.scenario_detail_grouping,
+                            template_slide_layout_index = 6
+                        )
+
+                    # 3) serialize & download
                     ppt_buf = BytesIO()
                     prs.save(ppt_buf)
                     ppt_buf.seek(0)
 
                     st.download_button(
                         "Download Scenario Summary (PowerPoint)",
-                        data=ppt_buf.getvalue(),
-                        file_name="scenario_summary.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                        data      = ppt_buf.getvalue(),
+                        file_name = "scenario_summary.pptx",
+                        mime      = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
                     st.success("PowerPoint file ready.")
+
+
+
+
 
 
 
