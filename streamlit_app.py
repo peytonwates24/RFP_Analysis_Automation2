@@ -712,28 +712,6 @@ def main():
                     except Exception as e:
                         st.error(f"Error preparing data for optimization: {e}")
 
-            ################################################################
-            # SCENARIO SUMMARY GROUPING (for PPT details) [Optional]
-            ################################################################
-            st.markdown("### Scenario Summary (PowerPoint) Configuration (Optional)")
-            if st.session_state.merged_data is not None:
-                grouping_options = st.session_state.merged_data.columns.tolist()
-                st.selectbox("Group by for Scenario Detail (PPT)", grouping_options, key="scenario_detail_grouping")
-
-                # (Optional) sub-summaries
-                st.toggle("Include Sub-Scenario Summaries?", key="scenario_sub_summaries_on")
-                if st.session_state["scenario_sub_summaries_on"]:
-                    scenario_summary_fields = st.session_state.merged_data.columns.tolist()
-                    st.selectbox("Scenario Summaries Selections", scenario_summary_fields, key="scenario_summary_selections")
-                    sub_vals = st.session_state.merged_data[st.session_state.scenario_summary_selections].unique()
-                    st.pills(
-                        "Select scenario sub-summaries",
-                        sub_vals,
-                        selection_mode="multi",
-                        key="sub_summary_selections"
-                    )
-            else:
-                st.info("No merged_data available; cannot configure scenario detail grouping yet.")
 
 
 
@@ -778,7 +756,7 @@ def main():
                         key="ppt_details_on"
                     )
                     if st.session_state.ppt_details_on:
-                        # 1) grouping dropdown (unchanged)
+                        # 1) grouping field
                         grouping_choices = []
                         if "Bid Data" in sheet_dfs:
                             grouping_choices += sheet_dfs["Bid Data"].columns.tolist()
@@ -789,47 +767,33 @@ def main():
                             "Grouping for details",
                             options=grouping_choices,
                             key="scenario_detail_grouping",
-                            help="Choose which field to group your scenario-detail slides by"
+                            help="Choose which field to group your scenario‐detail slides by"
                         )
 
-                        # 2) extras multiselect
-                        all_cols = []
+                        # 2) additional detail columns (excluding defaults)
+                        detail_opts = []
                         if "Bid Data" in sheet_dfs:
-                            all_cols += sheet_dfs["Bid Data"].columns.tolist()
+                            detail_opts += sheet_dfs["Bid Data"].columns.tolist()
                         if "Item Attributes" in sheet_dfs:
-                            all_cols += sheet_dfs["Item Attributes"].columns.tolist()
+                            detail_opts += sheet_dfs["Item Attributes"].columns.tolist()
 
-                        # columns we always include (never shown as extras)
-                        mandatory = {
+                        # remove always-present columns
+                        defaults = {
                             "Bid ID",
                             "Current Price",
                             "Awarded Supplier",
                             "Effective Supplier Price",
                             "Awarded Volume",
-                            "Current Price Savings",
-                            st.session_state.scenario_detail_grouping
+                            "Current Price Savings"
                         }
-
-                        # **new**: also exclude these entirely from the UI
-                        exclude_cols = {
-                            "Bid Volume",
-                            "Price",
-                            "Supplier Name",
-                            "Baseline Price"
-                        }
-
-                        # build the list of user‐selectable extras
-                        extras = [
-                            c for c in all_cols
-                            if c not in mandatory
-                            and c not in exclude_cols
-                        ]
+                        detail_opts = [c for c in detail_opts if c not in defaults]
 
                         st.multiselect(
                             "Additional detail columns",
-                            options=extras,
-                            default=[],
-                            key="scenario_detail_columns"
+                            options=detail_opts,
+                            default=st.session_state.get("scenario_detail_columns", []),
+                            key="scenario_detail_columns",
+                            help="These will appear between 'Grouping' and 'Bid Volume' in the table"
                         )
 
 
@@ -958,13 +922,16 @@ def main():
                         template_file_path = template_file_path
                     )
 
-                    # 2) detail slides if requested
+                    # 2) detail slides, if requested
                     if st.session_state.ppt_details_on:
                         add_scenario_detail_slides(
                             prs                         = prs,
                             scenario_dfs                = scenario_results_dict,
                             grouping_col                = st.session_state.scenario_detail_grouping,
-                            template_slide_layout_index = 6
+                            template_slide_layout_index = 6,
+                            detail_columns              = st.session_state.get("scenario_detail_columns", []),
+                            item_attr_df                = sheet_dfs["Item Attributes"],
+                            bid_data_df                 = sheet_dfs["Bid Data"]
                         )
 
                     # 3) serialize & download
@@ -979,6 +946,8 @@ def main():
                         mime      = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
                     st.success("PowerPoint file ready.")
+
+
 
 
 
