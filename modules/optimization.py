@@ -59,9 +59,16 @@ def split_bid_data_sheet(bid_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     contains “Baseline Price” & “Current Price” columns; otherwise that legacy
     sheet will be fabricated later from the separate *Item Attributes* tab.
     """
-    # recognise optional freight columns
-    freight_cols = [c for c in ("Supplier Freight", "KBX") if c in bid_df.columns]
-
+    # recognise optional freight columns only if non‐blank
+    freight_cols = []
+    for c in ("Supplier Freight", "KBX"):
+        if c in bid_df.columns:
+            # treat empty strings / all‐NaN as “blank”
+            non_blank = bid_df[c].notna() & (bid_df[c].astype(str).str.strip() != "")
+            if non_blank.any():
+                freight_cols.append(c)
+            else:
+                st.warning(f"Freight column '{c}' is present but empty → ignoring freight.")  
     # ---- Price -----------------------------------------------------------
     price_cols = ["Supplier Name", "Bid ID", "Price"] + freight_cols
     price_df   = bid_df[price_cols].copy()
@@ -292,6 +299,16 @@ def run_optimization(
     for bid in list(demand_data):
         if not any(price_data.get((s, bid)) for s in suppliers):
             demand_data[bid] = 0
+
+    # ── VERIFY INCUMBENT BIDS EXIST ───────────────────────────────
+    # For any Bid ID with positive demand, ensure the incumbent has a bid.
+    for j, dem in demand_data.items():
+        inc = item_attr_data[j].get("Incumbent")
+        # only enforce if there's real demand and an incumbent name
+        if dem > 0 and inc:
+            if (inc, j) not in price_data:
+                # clear, custom error
+                raise ValueError(f"Missing incumbent bid '{inc}' for Bid ID {j}")
 
     items_dynamic = list(demand_data.keys())
 

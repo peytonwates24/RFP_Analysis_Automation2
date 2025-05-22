@@ -293,7 +293,24 @@ def main():
                 }
             ]
 
-        # Let the user upload Excel
+
+        # build the path to your template file
+        template_path = os.path.join(os.path.dirname(__file__), "Standard Template.xlsx")
+
+        # read it in binary mode
+        with open(template_path, "rb") as f:
+            template_bytes = f.read()
+
+        # then use download_button
+        st.download_button(
+            label="Download Standard Template",
+            data=template_bytes,
+            file_name="Standard Template.xlsx",
+            
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+            # Let the user upload Excel
         # ──────────────────────────────────────────────────────────────────────────────
         # Upload workbook & auto-convert if the user supplied the new 5-tab template
         # ──────────────────────────────────────────────────────────────────────────────
@@ -351,15 +368,39 @@ def main():
                     )
 
             # ──────────────────────────────────────────────────────────────
-            # 5)  Detect whether freight columns exist (either template)
+            # 5)  Detect whether freight columns are truly present & non-blank
             # ──────────────────────────────────────────────────────────────
             price_sheet_name = "Price" if "Price" in sheet_dfs else "Bid Data"
-            price_cols       = sheet_dfs[price_sheet_name].columns.str.strip().tolist()
-            freight_enabled  = all(c in price_cols for c in ["Supplier Freight", "KBX"])
+            df_price        = sheet_dfs[price_sheet_name]
+            cols            = df_price.columns.str.strip().tolist()
+
+            # only “enable” freight if both columns exist AND have ≥1 non-blank value
+            sf_ok  = "Supplier Freight" in cols and (df_price["Supplier Freight"]
+                                                    .notna()
+                                                    .astype(str)
+                                                    .str.strip()
+                                                    .ne("")
+                                                    .any())
+            kbx_ok = "KBX"            in cols and (df_price["KBX"]
+                                                    .notna()
+                                                    .astype(str)
+                                                    .str.strip()
+                                                    .ne("")
+                                                    .any())
+
+            # warn if header present but totally blank
+            if "Supplier Freight" in cols and not sf_ok:
+                st.warning("Column 'Supplier Freight' is present but all values are blank → disabling freight logic.")
+            if "KBX" in cols and not kbx_ok:
+                st.warning("Column 'KBX' is present but all values are blank → disabling freight logic.")
+
+            freight_enabled = sf_ok and kbx_ok
+
             st.info(
                 f"Freight logic **{'ENABLED' if freight_enabled else 'DISABLED'}** "
-                f"(detected in *{price_sheet_name}* tab)"
+                f"(checked in *{price_sheet_name}* tab)"
             )
+
 
 
             ################################################################
@@ -886,9 +927,23 @@ def main():
 
                             scenario_results_dict[scenario_nm] = df_res
 
+                       # except Exception as run_err:
+                        #    st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
+                         #   scenario_results_dict[scenario_nm] = pd.DataFrame()
+                        except ValueError as run_err:
+                            msg = str(run_err)
+                            # our custom incumbent‐missing error
+                            if msg.startswith("Missing incumbent bid"):
+                               # extract inc and bid from the message
+                                # (we know it’s in the form "Missing incumbent bid 'X' for Bid ID Y")
+                                inc, bid = msg.split("'")[1], msg.rsplit(" ",1)[-1]
+                                st.warning(
+                                    f"{scenario_nm} Failed — Missing incumbent '{inc}' bid on Bid ID {bid}."
+                                )
+                            else:
+                                st.warning(f"Scenario '{scenario_nm}' failed: {msg}")
                         except Exception as run_err:
                             st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
-                            scenario_results_dict[scenario_nm] = pd.DataFrame()
 
                 # ───────────── Compile Excel ─────────────
                 if run_excel:
@@ -924,10 +979,15 @@ def main():
 
                     # 2) detail slides, if requested
                     if st.session_state.ppt_details_on:
+                        # normalize grouping_col
+                        grouping_col = st.session_state.scenario_detail_grouping
+                        if grouping_col == "Supplier Name":
+                            grouping_col = "Awarded Supplier"
+
                         add_scenario_detail_slides(
                             prs                         = prs,
                             scenario_dfs                = scenario_results_dict,
-                            grouping_col                = st.session_state.scenario_detail_grouping,
+                            grouping_col                = grouping_col,
                             template_slide_layout_index = 6,
                             detail_columns              = st.session_state.get("scenario_detail_columns", []),
                             item_attr_df                = sheet_dfs["Item Attributes"],
@@ -946,6 +1006,7 @@ def main():
                         mime      = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
                     st.success("PowerPoint file ready.")
+
 
 
 
