@@ -526,6 +526,7 @@ def add_scenario_detail_slides(
             avg_bid = sub["Effective Supplier Price"].mean() if "Effective Supplier Price" in sub else 0
             bid_sp = avg_bid * vol
             sav = sub["Current Savings"].sum()
+            sav_reb = sub["Rebate Savings"].sum()  
             summary.append({
                 "Grouping": grp,
                 **{col: ", ".join(sub[col].dropna().astype(str).unique()) for col in detail_columns},
@@ -535,17 +536,18 @@ def add_scenario_detail_slides(
                 "Avg Bid Price": avg_bid,
                 "Bid Spend": bid_sp,
                 "Current Savings": sav,
+                "Rebate Savings":    sav_reb,
                 "Incumbent Dist": sub.groupby("Incumbent")["Awarded Volume"].sum().reset_index(),
                 "Awarded Dist":   sub.groupby("Awarded Supplier")["Awarded Volume"].sum().reset_index()
             })
 
         # Table
         cols = ["Grouping"] + detail_columns + [
-            "Bid Volume","Incumbent","Avg Current Price","Current Spend",
-            "Awarded Supplier","Avg Bid Price","Bid Spend","Current Savings"
+            "Bid Volume","Incumbent","Avg Current Price","Current Spend", 
+            "Awarded Supplier","Avg Bid Price","Bid Spend","Current Savings", "Rebate Savings"
         ]
         rows = len(summary) + 2
-        left, top = Inches(0.5), Inches(2.0)
+        left, top = Inches(0.1), Inches(2.4)
         table = slide.shapes.add_table(
             rows, len(cols),
             left, top,
@@ -575,7 +577,7 @@ def add_scenario_detail_slides(
                     val = data.get(col, "")
                     if col in ("Avg Current Price","Avg Bid Price"):
                         txt = f"${val:.2f}"
-                    elif col in ("Current Spend","Bid Spend","Current Savings"):
+                    elif col in ("Current Spend","Bid Spend","Current Savings", "Rebate Savings"):
                         txt = f"${(val/1_000_000):.1f}MM"
                     else:
                         txt = str(val)
@@ -613,6 +615,7 @@ def add_scenario_detail_slides(
         cur_tot = sum(r["Current Spend"] for r in summary)
         bid_tot = sum(r["Bid Spend"] for r in summary)
         sav_tot = sum(r["Current Savings"] for r in summary)
+        sav_reb_tot = sum(r["Rebate Savings"]  for r in summary)
         avg_cur_tot = sum(r["Avg Current Price"]*r["Bid Volume"] for r in summary)/vol_tot
         avg_bid_tot = sum(r["Avg Bid Price"]*r["Bid Volume"] for r in summary)/vol_tot
 
@@ -623,7 +626,8 @@ def add_scenario_detail_slides(
             "Current Spend": cur_tot,
             "Avg Bid Price": avg_bid_tot,
             "Bid Spend": bid_tot,
-            "Current Savings": sav_tot
+            "Current Savings": sav_tot,
+            "Rebate Savings":     sav_reb_tot
         }
         for j, col in enumerate(cols):
             cell = table.cell(tr, j)

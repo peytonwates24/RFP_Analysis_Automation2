@@ -722,7 +722,7 @@ def main():
                             # 2) strip whitespace from all column names
                             df_results.columns = df_results.columns.str.strip()
 
-
+                            
                             # 3) rename any aliases → the exact names ppt_scenario expects
                             df_results = df_results.rename(columns={
                                 "Savings"               : "Baseline Savings",
@@ -922,26 +922,33 @@ def main():
                                             df_res["Current Price"] * df_res["Awarded Volume"]
                                         )
                                         logger.info(f"[{scenario_nm}] built Current Baseline Spend")
+
+                                # ─── reorder so Current Baseline Spend sits next to Current Price ───
+                                cols = df_res.columns.tolist()
+                                if "Current Baseline Spend" in cols and "Current Price" in cols:
+                                    cols.remove("Current Baseline Spend")
+                                    idx = cols.index("Current Price")
+                                    cols.insert(idx+1, "Current Baseline Spend")
+                                    df_res = df_res[cols]
+
                             except Exception:
                                 df_res = pd.DataFrame()
 
                             scenario_results_dict[scenario_nm] = df_res
 
-                       # except Exception as run_err:
-                        #    st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
-                         #   scenario_results_dict[scenario_nm] = pd.DataFrame()
                         except ValueError as run_err:
                             msg = str(run_err)
                             # our custom incumbent‐missing error
-                            if msg.startswith("Missing incumbent bid"):
-                               # extract inc and bid from the message
-                                # (we know it’s in the form "Missing incumbent bid 'X' for Bid ID Y")
-                                inc, bid = msg.split("'")[1], msg.rsplit(" ",1)[-1]
+                            if msg.startswith("Missing incumbent"):
+                                # extract inc and bid from the message
+                                # we know it's in the form "Missing incumbent 'X' bid on Bid ID Y"
+                                inc, bid = msg.split("'")[1], msg.rsplit(" ", 1)[-1]
                                 st.warning(
                                     f"{scenario_nm} Failed — Missing incumbent '{inc}' bid on Bid ID {bid}."
                                 )
                             else:
                                 st.warning(f"Scenario '{scenario_nm}' failed: {msg}")
+
                         except Exception as run_err:
                             st.warning(f"Scenario '{scenario_nm}' failed: {run_err}")
 
@@ -1006,18 +1013,6 @@ def main():
                         mime      = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
                     st.success("PowerPoint file ready.")
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     elif section == 'upload':
@@ -2402,6 +2397,7 @@ def main():
                         # If no ppt_data is available, either user didn't select presentations
                         # or required conditions for certain presentations were not met.
                         logger.info("No presentation available for download.")
+
 
 
 
