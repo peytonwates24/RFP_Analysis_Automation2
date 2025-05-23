@@ -297,6 +297,9 @@ def main():
         # build the path to your template file
         template_path = os.path.join(os.path.dirname(__file__), "Standard Template.xlsx")
 
+        st.write("Looking for template at:", template_path)
+        st.write("Template found:", os.path.exists(template_path))
+
         # read it in binary mode
         with open(template_path, "rb") as f:
             template_bytes = f.read()
